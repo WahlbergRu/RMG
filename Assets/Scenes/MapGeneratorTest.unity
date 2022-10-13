@@ -198,7 +198,7 @@ MeshCollider:
   serializedVersion: 4
   m_Convex: 0
   m_CookingOptions: 30
-  m_Mesh: {fileID: 338975743}
+  m_Mesh: {fileID: 362207754}
 --- !u!4 &90414406
 Transform:
   m_ObjectHideFlags: 0
@@ -221,7 +221,7 @@ MeshFilter:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 90414403}
-  m_Mesh: {fileID: 338975743}
+  m_Mesh: {fileID: 362207754}
 --- !u!1 &125710535
 GameObject:
   m_ObjectHideFlags: 0
@@ -262,132 +262,168 @@ MonoBehaviour:
   drawNodeCenters: 0
   drawPrefabs: 0
   mapNodeSettings:
-  - type: 1
-    color: {r: 0, g: 0.5353284, b: 1, a: 0}
-    modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
   - type: 0
-    color: {r: 0.28487015, g: 0.1745283, b: 1, a: 0}
+    color: {r: 0.38660112, g: 0.34349412, b: 0.8773585, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 0
+    elevationMax: 0
+  - type: 1
+    color: {r: 0, g: 0.27964467, b: 0.6603774, a: 1}
+    modelList: []
+    precipitationMin: 0
+    precipitationMax: 0
+    heatMin: 0
+    heatMax: 0
+    elevationMin: 0
+    elevationMax: 0
   - type: 2
-    color: {r: 0.6173282, g: 0.59474015, b: 0.764151, a: 0}
+    color: {r: 0.6173282, g: 0.59474015, b: 0.764151, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 0
+    elevationMax: 0
   - type: 3
-    color: {r: 0.54908437, g: 0.54561234, b: 0.5754717, a: 0}
+    color: {r: 0.54908437, g: 0.54561234, b: 0.5754717, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 13
+    elevationMax: 18
   - type: 4
-    color: {r: 0.47668213, g: 0.9811321, b: 0.67274714, a: 0}
+    color: {r: 0.47668213, g: 0.9811321, b: 0.67274714, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 0
+    elevationMax: 0
   - type: 5
-    color: {r: 1, g: 0.0698705, b: 0, a: 0}
+    color: {r: 1, g: 0.0698705, b: 0, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 0
+    elevationMax: 0
   - type: 6
-    color: {r: 0.9150943, g: 0.88701177, b: 0.88487893, a: 0}
+    color: {r: 0.9150943, g: 0.88701177, b: 0.88487893, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 0
+    elevationMax: 0
   - type: 7
-    color: {r: 0.68772703, g: 0.754717, b: 0.16019939, a: 0}
+    color: {r: 0.68772703, g: 0.754717, b: 0.16019939, a: 1}
     modelList: []
     precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
+    precipitationMax: 80
+    heatMin: 22
+    heatMax: 100
+    elevationMin: 0
+    elevationMax: 0
   - type: 8
-    color: {r: 0.9240597, g: 1, b: 0.3254717, a: 0}
+    color: {r: 0.9240597, g: 1, b: 0.3254717, a: 1}
     modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
+    precipitationMin: 50
+    precipitationMax: 75
     heatMin: 0
-    heatMax: 0
+    heatMax: 22
+    elevationMin: 0
+    elevationMax: 0
   - type: 9
-    color: {r: 0.7491768, g: 0.8113208, b: 0.24875402, a: 0}
+    color: {r: 0.7491768, g: 0.8113208, b: 0.24875402, a: 1}
     modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
-  - type: 10
-    color: {r: 0.67770755, g: 0.745283, b: 0.13710396, a: 0}
-    modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
-  - type: 11
-    color: {r: 0.43457416, g: 0.8207547, b: 0.24390352, a: 0}
-    modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
-  - type: 12
-    color: {r: 0.3152368, g: 0.6226415, b: 0.16153437, a: 0}
-    modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
+    precipitationMin: 80
+    precipitationMax: 160
+    heatMin: 22
+    heatMax: 100
+    elevationMin: 0
+    elevationMax: 0
   - type: 13
-    color: {r: 0.16965407, g: 0.4811321, b: 0.015886446, a: 0}
+    color: {r: 0.16965407, g: 0.4811321, b: 0.015886446, a: 1}
     modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
+    precipitationMin: 100
+    precipitationMax: 250
+    heatMin: 18
+    heatMax: 100
+    elevationMin: 0
+    elevationMax: 0
+  - type: 10
+    color: {r: 0.67770755, g: 0.745283, b: 0.13710396, a: 1}
+    modelList: []
+    precipitationMin: 250
+    precipitationMax: 2000
+    heatMin: 22
+    heatMax: 100
+    elevationMin: 0
+    elevationMax: 0
+  - type: 11
+    color: {r: 0.43457416, g: 0.8207547, b: 0.24390352, a: 1}
+    modelList: []
+    precipitationMin: 30
+    precipitationMax: 60
+    heatMin: 18
+    heatMax: 22
+    elevationMin: 0
+    elevationMax: 0
+  - type: 12
+    color: {r: 0.3152368, g: 0.6226415, b: 0.16153437, a: 1}
+    modelList: []
+    precipitationMin: 60
+    precipitationMax: 100
     heatMin: 0
-    heatMax: 0
+    heatMax: 22
+    elevationMin: 0
+    elevationMax: 0
   - type: 14
-    color: {r: 0.3911002, g: 0.5377358, b: 0.06848522, a: 0}
+    color: {r: 0.3911002, g: 0.5377358, b: 0.06848522, a: 1}
     modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
-    heatMin: 0
-    heatMax: 0
+    precipitationMin: 200
+    precipitationMax: 4000
+    heatMin: 18
+    heatMax: 22
+    elevationMin: 0
+    elevationMax: 0
   - type: 15
-    color: {r: 0.2926358, g: 0.3773585, b: 0.11213955, a: 0}
+    color: {r: 0.2926358, g: 0.3773585, b: 0.11213955, a: 1}
     modelList: []
-    precipitationMin: 0
-    precipitationMax: 0
+    precipitationMin: 90
+    precipitationMax: 2000
     heatMin: 0
-    heatMax: 0
+    heatMax: 18
+    elevationMin: 0
+    elevationMax: 0
   - type: 16
-    color: {r: 0.74499214, g: 0.7735849, b: 0.6823603, a: 0}
+    color: {r: 0.74499214, g: 0.7735849, b: 0.6823603, a: 1}
     modelList: []
     precipitationMin: 0
-    precipitationMax: 0
+    precipitationMax: 50
     heatMin: 0
-    heatMax: 0
+    heatMax: 18
+    elevationMin: 0
+    elevationMax: 0
   - type: 17
-    color: {r: 1, g: 1, b: 1, a: 0}
+    color: {r: 1, g: 1, b: 1, a: 1}
     modelList: []
     precipitationMin: 0
     precipitationMax: 0
     heatMin: 0
     heatMax: 0
+    elevationMin: 18
+    elevationMax: 200
   townModels:
   - minPopulation: 0
     maxPopulation: 0
@@ -418,7 +454,7 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 3
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!43 &338975743
+--- !u!43 &362207754
 Mesh:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -737,6 +773,37 @@ MonoBehaviour:
   RotationSmoothingValue: 5
   MoveSensitivity: 5
   allowRotation: 1
+--- !u!1 &1842643784
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1842643785}
+  m_Layer: 0
+  m_Name: PrefabContainer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1842643785
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842643784}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 4
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1858342692
 GameObject:
   m_ObjectHideFlags: 0
@@ -831,34 +898,3 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
---- !u!1 &2077296988
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2077296989}
-  m_Layer: 0
-  m_Name: PrefabContainer
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &2077296989
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2077296988}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_RootOrder: 4
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

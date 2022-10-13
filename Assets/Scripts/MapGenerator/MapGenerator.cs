@@ -117,96 +117,6 @@ public static class MapGenerator
         {
             if (node.nodeType == MapGraph.MapNodeType.Replace)
             {
-                // if (node.heat > )
-
-                if (node.heat > 22)
-                {
-                    if (node.precipitation < 80)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.SubtropicalDesert;
-                        Debug.Log(node);
-                    }
-                    else if (node.precipitation < 250)
-                    {
-                        // MapGraph.MapNodeType.SeasonalForest
-                        int RandomValue = UnityEngine.Random.Range(0, 2);
-                        if (RandomValue == 0)
-                        {
-                            node.nodeType = MapGraph.MapNodeType.Savanna;
-                        }
-                        else
-                        {
-                            node.nodeType = MapGraph.MapNodeType.SeasonalForest;
-                        }
-                    }
-                    else
-                    {
-                        node.nodeType = MapGraph.MapNodeType.TropicalRainforest;
-                    }
-                    // node.biomeType
-                }
-                else if (node.heat > 18 && node.heat <= 22)
-                {
-                    if (node.precipitation < 60)
-                    {
-                        int RandomValue = UnityEngine.Random.Range(0, 2);
-                        if (RandomValue == 0)
-                        {
-                            node.nodeType = MapGraph.MapNodeType.Grassland;
-                        }
-                        else
-                        {
-                            node.nodeType = MapGraph.MapNodeType.Desert;
-                        }
-                    }
-                    else if (node.precipitation < 100)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.Woodland;
-                    }
-                    else if (node.precipitation < 200)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.SeasonalForest;
-                    }
-                    else
-                    {
-                        node.nodeType = MapGraph.MapNodeType.TemperateRainforest;
-                    }
-                }
-                else if (node.heat <= 18)
-                {
-                    if (node.precipitation < 50)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.Tundra;
-                    }
-                    else if (node.precipitation < 75)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.Desert;
-                    }
-                    else if (node.precipitation < 90)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.Woodland;
-                    }
-                    else if (node.precipitation < 120)
-                    {
-                        node.nodeType = MapGraph.MapNodeType.BorealForest;
-                    }
-                    else
-                    {
-                        node.nodeType = MapGraph.MapNodeType.BorealForest;
-                    }
-                }
-
-                if (node.GetElevation() > 18)
-                {
-                    node.nodeType = MapGraph.MapNodeType.Ice;
-                }
-                else if (node.GetElevation() > 13)
-                {
-                    node.nodeType = MapGraph.MapNodeType.Mountain;
-                }
-
-
-
                 foreach (MapNodeTypeEntity mapNodeSetting in mapNodeSettings)
                 {
                     if (
@@ -218,6 +128,23 @@ public static class MapGenerator
                     {
                         node.nodeType = mapNodeSetting.type;
                     }
+                }
+
+                foreach (MapNodeTypeEntity mapNodeSetting in mapNodeSettings)
+                {
+                    if (
+                        node.GetElevation() > mapNodeSetting.elevationMin &&
+                        node.GetElevation() <= mapNodeSetting.elevationMax &&
+                        node.GetElevation() != 0
+                    )
+                    {
+                        node.nodeType = mapNodeSetting.type;
+                    }
+                }
+
+                if (node.nodeType == MapNodeType.Replace)
+                {
+                    Debug.Log($"Without settings {node}");
                 }
 
             }

@@ -7,7 +7,14 @@ public class MapGeneratorPreviewEditor : Editor
 
     public override void OnInspectorGUI()
     {
+
+
         MapGeneratorPreview generator = (MapGeneratorPreview)target;
+
+        if (GUILayout.Button("Generate"))
+        {
+            generator.GenerateMap();
+        }
 
         if (DrawDefaultInspector())
         {

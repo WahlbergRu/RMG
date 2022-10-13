@@ -190,7 +190,6 @@ public static class MapTextureGenerator
         foreach (var node in map.nodesByCenterPosition.Values)
         {
             var color = colours.ContainsKey(node.nodeType) ? colours[node.nodeType] : Color.red;
-            Debug.Log($"{color} {node.nodeType}");
             GL.Color(color);
 
             foreach (var edge in node.GetEdges())
