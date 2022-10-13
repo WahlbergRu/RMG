@@ -6,7 +6,7 @@ It produces maps like this:
 ![Screenshot 2022-10-13 122010](https://user-images.githubusercontent.com/4931005/195557749-5fe4c71e-1b77-4bb1-85c7-d5e7fa9f7f95.png)
 
 # Difference from SteveJohnstone
-- Fix a bug with meshsize for large models (if meshsize more than ~300-350). Change index format to int32, now is possible generate mesh under 800k verts. 
+- Fix a bug with meshsize for large models (if meshsize more than ~300-350). Change index format to int32, it possible generate mesh under 800k verts. 
 - Add humidity layer
 - Add heat layer
 - Add precipitation layer
