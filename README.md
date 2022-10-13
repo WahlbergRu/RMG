@@ -12,7 +12,7 @@ It produces maps like this:
 - Add precipitation layer
 - Fix recursive code for ocean (unity broken with exception)
 - Fix falloff river bug
-- Add bioms layer like that ![image](https://user-images.githubusercontent.com/4931005/195560213-b39c3680-2067-4703-a734-2b7b38f0d906.png)
+- Add bioms layer like on image with configurable from editor ![image](https://user-images.githubusercontent.com/4931005/195560213-b39c3680-2067-4703-a734-2b7b38f0d906.png)
 - Add prefabs layer to every centroid with random choosen from a list
 - Add town layer instead biome town
 
