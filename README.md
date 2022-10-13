@@ -7,6 +7,9 @@ It produces maps like this:
 ![Image of Generated Map](https://raw.githubusercontent.com/SteveJohnstone/VoronoiMapGen/master/Readme/sample.gif)
 
 ## References
+- SteveJohnstone Voronoi Map Gen project
+  - https://github.com/SteveJohnstone/VoronoiMapGen
+  - Licence: MIT
 - jceipek's Unity-delaunay project
   - https://github.com/jceipek/Unity-delaunay
   - Licence: MIT

@@ -25,7 +25,7 @@ public partial class MapGeneratorPreview : MonoBehaviour
     [SerializeField] protected bool drawNodeCenters;
     [SerializeField] protected bool drawPrefabs;
 
-    [SerializeField] protected List<MapNodeTypeColor> colours;
+    [SerializeField] protected List<MapNodeTypeEntity> mapNodeSettings;
     [SerializeField] protected List<MapNodeTown> townModels;
 
     [Header("Voronoi Generation")]
@@ -71,8 +71,9 @@ public partial class MapGeneratorPreview : MonoBehaviour
         Debug.Log(string.Format("Finished Generating Map Graph: {0:n0}ms with {1} nodes", DateTime.Now.Subtract(startTime).TotalMilliseconds, mapGraph.nodesByCenterPosition.Count));
 
         time = DateTime.Now;
-        MapGenerator.GenerateMap(mapGraph, heightMapSettings, seed, meshSize);
+        MapGenerator.GenerateMap(mapGraph, heightMapSettings, seed, meshSize, mapNodeSettings);
         // Debug.Log(string.Format("Map Generated: {0:n0}ms", DateTime.Now.Subtract(time).TotalMilliseconds));
+
 
         if (previewType == PreviewType.HeightMap)
         {
@@ -86,21 +87,30 @@ public partial class MapGeneratorPreview : MonoBehaviour
             Debug.Log(string.Format("Mesh Generated: {0:n0}ms", DateTime.Now.Subtract(time).TotalMilliseconds));
 
             time = DateTime.Now;
-            var texture = MapTextureGenerator.GenerateTexture(mapGraph, seed, meshSize, textureSize, colours, drawNodeBoundries, drawDelauneyTriangles, drawNodeCenters, drawPrefabs);
+            var texture = MapTextureGenerator.GenerateTexture(mapGraph, seed, meshSize, textureSize, mapNodeSettings, drawNodeBoundries, drawDelauneyTriangles, drawNodeCenters, drawPrefabs);
             Debug.Log(string.Format("Texture Generated: {0:n0}ms", DateTime.Now.Subtract(time).TotalMilliseconds));
 
             UpdateTexture(texture);
 
-
-            //create prefab containers
-            if (PrefabContainer != null)
+            if (drawPrefabs)
             {
-                Destroy(PrefabContainer.gameObject);
+
+
+                if (GameObject.Find("PrefabContainer"))
+                {
+                    PrefabContainer = GameObject.Find("PrefabContainer").transform;
+                }
+
+                //create prefab containers
+                if (PrefabContainer != null)
+                {
+                    DestroyImmediate(PrefabContainer.gameObject);
+                }
+
+                PrefabContainer = new GameObject(nameof(PrefabContainer)).transform;
+
+                DrawPrefabs(mapGraph, seed, mapNodeSettings, townModels, PrefabContainer);
             }
-
-            PrefabContainer = new GameObject(nameof(PrefabContainer)).transform;
-
-            if (drawPrefabs) DrawPrefabs(mapGraph, seed, colours, townModels, PrefabContainer);
 
         }
 
@@ -168,6 +178,7 @@ public partial class MapGeneratorPreview : MonoBehaviour
         UpdateTexture(texture);
     }
 
+    // TODO: cut and paste into extension 
     /// <summary>
     /// Returns a random vector3 between min and max. (Inclusive)
     /// </summary>
@@ -192,6 +203,7 @@ public partial class MapGeneratorPreview : MonoBehaviour
     /// <param name="minPadding">Minimum padding.</param>
     /// <param name="maxPadding">Max padding.</param>
     /// https://gist.github.com/Ashwinning/269f79bef5b1d6ee1f83
+    /// 
     public static Vector3 GetRandomVector3Between(Vector3 min, Vector3 max, float minPadding, float maxPadding)
     {
         //minpadding as a value between 0 and 1
@@ -203,7 +215,7 @@ public partial class MapGeneratorPreview : MonoBehaviour
 
 
 
-    private static void DrawPrefabs(MapGraph map, int seed, List<MapNodeTypeColor> mapNodeTypes, List<MapNodeTown> townModelsByPopulation, Transform container)
+    private static void DrawPrefabs(MapGraph map, int seed, List<MapNodeTypeEntity> mapNodeTypes, List<MapNodeTown> townModelsByPopulation, Transform container)
     {
         // mapNodeTypes
         // GL.Color();

@@ -19,7 +19,7 @@ MonoBehaviour:
     octaves: 5
     persistance: 0.43
     lacunarity: 2
-    seed: 25
+    seed: 10
     offset: {x: 0, y: 0}
   useFalloff: 1
   heightMultiplier: 50
@@ -81,3 +81,6 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 0
   falloffType: 1
+  cityDistrictCount: 100
+  overallTemperature: 30
+  precipitation: 50

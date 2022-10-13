@@ -7,7 +7,7 @@ using static MapGraph;
 public static class MapGenerator
 {
 
-    public static void GenerateMap(MapGraph graph, HeightMapSettings heightMapSettings, int seed, int meshSize)
+    public static void GenerateMap(MapGraph graph, HeightMapSettings heightMapSettings, int seed, int meshSize, List<MapNodeTypeEntity> mapNodeSettings)
     {
         SetNodesToReplace(graph);
         SetLowNodesToWater(graph, 0.2f);
@@ -19,7 +19,7 @@ public static class MapGenerator
         SpreadHumidity(graph);
         SetHeat(graph, heightMapSettings.overallTemperature);
         SetPrecipitation(graph, heightMapSettings.precipitation);
-        SetBioms(graph, seed);
+        SetBioms(graph, seed, mapNodeSettings);
 
         AverageCenterPoints(graph);
 
@@ -36,36 +36,14 @@ public static class MapGenerator
 
     private static void AverageCenterPoints(MapGraph graph)
     {
-        // foreach (var node in graph.points)
-        // {
-        //     Debug.Log(node);
-
-        // }
         foreach (var node in graph.nodesByCenterPosition.Values)
         {
             node.centerPoint = new Vector3(node.centerPoint.x, node.GetCorners().Average(x => x.position.y), node.centerPoint.z);
-            // Debug.Log(node);
-            // node.GetEdges().ToList().ForEach(edge =>
-            // {
-
-            //     // if (Vector2.Distance(
-            //     //         new Vector2(edge.next.destination.position.x, edge.next.destination.position.y),
-            //     //         new Vector2(edge.destination.position.x, edge.destination.position.y)
-            //     //     ) > 100)
-            //     // {
-            //     //     edge.previous.destination.position = new Vector3(edge.previous.destination.position.x, edge.previous.destination.position.y + 100, edge.previous.destination.position.z);
-            //     //     Debug.Log(edge.previous.destination.position);
-            //     //     Debug.Log(edge.destination.position);
-            //     // };
-            //     // vec.
-
-            // });
         }
     }
 
     private static void SpreadHumidity(MapGraph graph)
     {
-        // TODO: edit into external recursive function
         foreach (var node in graph.nodesByCenterPosition.Values)
         {
             if (
@@ -131,7 +109,7 @@ public static class MapGenerator
         });
     }
 
-    private static void SetBioms(MapGraph graph, int seed)
+    private static void SetBioms(MapGraph graph, int seed, List<MapNodeTypeEntity> mapNodeSettings)
     {
         UnityEngine.Random.InitState(seed);
 
@@ -139,12 +117,14 @@ public static class MapGenerator
         {
             if (node.nodeType == MapGraph.MapNodeType.Replace)
             {
-                // Debug.Log(node);
+                // if (node.heat > )
+
                 if (node.heat > 22)
                 {
                     if (node.precipitation < 80)
                     {
                         node.nodeType = MapGraph.MapNodeType.SubtropicalDesert;
+                        Debug.Log(node);
                     }
                     else if (node.precipitation < 250)
                     {
@@ -224,8 +204,22 @@ public static class MapGenerator
                 {
                     node.nodeType = MapGraph.MapNodeType.Mountain;
                 }
-                // MapGraph.MapBiomeType
-                // node.heat
+
+
+
+                foreach (MapNodeTypeEntity mapNodeSetting in mapNodeSettings)
+                {
+                    if (
+                        node.heat > mapNodeSetting.heatMin &&
+                        node.heat <= mapNodeSetting.heatMax &&
+                        node.precipitation > mapNodeSetting.precipitationMin &&
+                        node.precipitation <= mapNodeSetting.precipitationMax
+                    )
+                    {
+                        node.nodeType = mapNodeSetting.type;
+                    }
+                }
+
             }
         }
 
@@ -244,11 +238,6 @@ public static class MapGenerator
     {
         var max = graph.points.Values.Max(point => point.position.z);
         var min = 0f;
-        Debug.Log(max);
-        // var maxHeight = graph.points.Values.Max(point => point.position.y);
-        // Debug.Log(maxHeight);
-        // var minHeight = graph.points.Values.Min(point => point.position.y);
-        // Debug.Log(minHeight);
         foreach (var node in graph.nodesByCenterPosition.Values)
         {
             float accumulation = 1f / (float)Math.Pow(Math.Cosh(node.centerPoint.z / (max - min) - 1 / 2), 2);
