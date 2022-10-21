@@ -5,6 +5,9 @@ one outlined by [Amit Patel at Red Blob Games](http://www-cs-students.stanford.e
 It produces maps like this:
 ![Screenshot 2022-10-13 122010](https://user-images.githubusercontent.com/4931005/195557749-5fe4c71e-1b77-4bb1-85c7-d5e7fa9f7f95.png)
 
+# TODO
+- rework currently virtual land, because it's not working
+
 # Difference from SteveJohnstone
 - Fixed a bug with meshsize for large models (if meshsize more than ~300-350). Change index format to int32, it possible generate mesh under 800k verts. 
 - Fixed recursive code for ocean (unity broken with exception)
