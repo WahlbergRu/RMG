@@ -1,4 +1,4 @@
-# Random Map Generator
+# Random Map Generator (based on VoronoiMapGen)
 This is a Unity implementation of a map generator using a similar process to the
 one outlined by [Amit Patel at Red Blob Games](http://www-cs-students.stanford.edu/~amitp/game-programming/polygon-map-generation/)
 
@@ -7,6 +7,7 @@ It produces maps like this:
 
 # TODO
 - rework currently virtual land, because it's not working
+- rework generate texture. Right now it's very long operation because unity create texture instead coloring each triangle separetly. 
 
 # Difference from SteveJohnstone
 - Fixed a bug with meshsize for large models (if meshsize more than ~300-350). Change index format to int32, it possible generate mesh under 800k verts. 
