@@ -9,7 +9,7 @@ It produces maps like this:
 - rework currently virtual land, because it's not working
 - rework generate texture. Right now it's very long operation because unity create texture instead coloring each triangle separetly. 
 - rework setWaterToEdge alhoritm (in testing)
-- increase manipulation with object placing, validate maxprefab to cell, to map, and frenquncy to each model.
+- increase manipulation with object placing, validate maxprefab to cell, to map, and frenquncy to each model.(in testing)
 
 # Difference from SteveJohnstone
 - Fixed a bug with meshsize for large models (if meshsize more than ~300-350). Change index format to int32, it possible generate mesh under 800k verts. 
