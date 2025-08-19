@@ -1,0 +1,94 @@
+# Unity files
+*.meta binary
+*.unity binary
+*.asset binary
+*.prefab binary
+*.mat binary
+*.anim binary
+*.controller binary
+*.overrideController binary
+*.physicMaterial binary
+*.physicsMaterial2D binary
+*.renderTexture binary
+*.mask binary
+*.brush binary
+*.guiskin binary
+*.fontsettings binary
+*.giparams binary
+
+# 3D models
+*.fbx binary
+*.dae binary
+*.3ds binary
+*.dxf binary
+*.obj binary
+*.skp binary
+*.max binary
+*.ma binary
+*.mb binary
+*.blend binary
+
+# Audio
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.aiff binary
+*.aif binary
+*.mod binary
+*.it binary
+*.s3m binary
+*.xm binary
+
+# Video
+*.mov binary
+*.mp4 binary
+*.mpg binary
+*.mpeg binary
+*.avi binary
+*.asf binary
+*.wmv binary
+*.flv binary
+*.swf binary
+*.mkv binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.tiff binary
+*.tif binary
+*.bmp binary
+*.exr binary
+*.hdr binary
+*.psd binary
+*.tga binary
+*.iff binary
+*.pict binary
+
+# Compressed files
+*.zip binary
+*.rar binary
+*.7z binary
+*.tar binary
+*.gz binary
+*.bz2 binary
+
+# Text files
+*.cs text
+*.js text
+*.boo text
+*.shader text
+*.compute text
+*.cginc text
+*.hlsl text
+*.glsl text
+*.txt text
+*.xml text
+*.json text
+*.csv text
+*.md text
+*.log text
+*.yml text
+*.yaml text
+*.toml text

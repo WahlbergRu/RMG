@@ -1,0 +1,243 @@
+# =============== #
+# Unity generated #
+# =============== #
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/*.csproj
+/*.unityproj
+/*.sln
+/*.suo
+/*.tmp
+/*.user
+/*.userprefs
+/*.pidb
+/*.booproj
+/*.svd
+/*.pdb
+/*.mdb
+/*.opendb
+/*.VC.db
+/*.VC.VC.opendb
+/*.[Cc]ache
+/*.log
+/*.csproj.*
+/*.vcxproj.*
+/*.vcxproj
+/sysinfo.txt
+/UnityPackageManager/
+/*.vs/
+/*.vscode/
+/.idea/
+/.vscode/
+/.consulo/
+
+# ================= #
+# Unity cache files #
+# ================= #
+/[Aa]ssets/[Ss]treaming[Aa]ssets/!*.meta
+/[Aa]ssets/[Rr]esources/!*.meta
+/[Aa]ssets/!*.meta
+/[Pp]ackages/!*.meta
+/[Pp]roject[Ss]ettings/!*.meta
+/[Ll]ocal[Pp]ackages/!*.meta
+
+# ==================== #
+# Unity Package Manager #
+# ==================== #
+/[Pp]ackages/manifest.json.backup
+/[Pp]ackages/packages-lock.json.backup
+
+# ===================== #
+# Visual Studio files   #
+# ===================== #
+/[Oo]bj/
+/[Bb]in/
+/[Dd]ebug/
+/[Rr]elease/
+/_ReSharper*/
+*.ReSharper
+*. mdb
+*. pdb
+*. user
+*. sbr
+*. suo
+*. tmp
+*. log
+*. vspscc
+*. vssscc
+*. unoproj
+*. orig
+*. bak
+*. ReSharper*
+*. dotCover*
+
+# ===================== #
+# OS generated files    #
+# ===================== #
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.tmp
+*.temp
+*~
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+Icon?
+Thumbs.db
+ehthumbs.db
+Thumbs.db:encryptable
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.cab
+*.msi
+*.msm
+*.msp
+*.msu
+*.ps1
+*.psm1
+*.vbs
+*.vbe
+*.bat
+*.cmd
+*.com
+*.cpl
+*.exe
+*.scr
+*.sys
+*.dll
+
+# ===================== #
+# Rider IDE             #
+# ===================== #
+/_ Rider*/
+*.DotSettings.user
+
+# ===================== #
+# Unity DOTS specific   #
+# ===================== #
+/[Aa]ssets/EntityCache/
+/[Aa]ssets/SceneCache/
+/[Aa]ssets/BuildSettings/
+/[Aa]ssets/SceneDependencyCache/
+/[Aa]ssets/AddressableAssetsData/!*.meta
+
+# ===================== #
+# Unity Burst           #
+# ===================== #
+/[Tt]emp/Burst/
+/[Ll]ibrary/Burst/
+
+# ===================== #
+# Unity Entities        #
+# ===================== #
+/[Tt]emp/JobDebugger/
+/[Ll]ibrary/EntitySceneDebugInfo/
+/[Ll]ibrary/EntityScenes/
+
+# ===================== #
+# Unity Hybrid Renderer #
+# ===================== #
+/[Ll]ibrary/Hybrid/
+/[Ll]ibrary/RenderPipelines/
+
+# ===================== #
+# Unity Addressables     #
+# ===================== #
+/[Ll]ibrary/AddressablesBuildData/
+/[Ll]ibrary/AddressableAssetsData/
+
+# ===================== #
+# Unity Shader Cache    #
+# ===================== #
+/[Ll]ibrary/ShaderCache/
+/[Ll]ibrary/ShaderGraph/
+/[Ll]ibrary/ShaderVariantCollectionCache/
+
+# ===================== #
+# Unity Collab          #
+# ===================== #
+/[Ll]ibrary/Collab/
+/[Ll]ibrary/SourceControl/
+
+# ===================== #
+# Unity Cloud           #
+# ===================== #
+/[Ll]ibrary/Cloud/
+
+# ===================== #
+# Unity Analytics       #
+# ===================== #
+/[Ll]ibrary/Analytics/
+
+# ===================== #
+# Unity Preferences     #
+# ===================== #
+/[Ll]ibrary/Preferences/
+
+# ===================== #
+# Unity State           #
+# ===================== #
+/[Ll]ibrary/StateCache/
+
+# ===================== #
+# Unity Crash Reports   #
+# ===================== #
+/[Ll]ibrary/CrashReport*
+
+# ===================== #
+# Unity Auto Streaming  #
+# ===================== #
+/[Aa]ssets/StreamingAssets/log.txt
+/[Aa]ssets/StreamingAssets/cache/
+
+# ===================== #
+# Unity Build Artifacts #
+# ===================== #
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ibrary/Builds/
+/[Ll]ibrary/BuildReports/
+/[Ll]ibrary/LastSceneManagerSetup.txt
+
+# ===================== #
+# Unity Package Cache   #
+# ===================== #
+/[Ll]ibrary/PackageCache/
+
+# ===================== #
+# Unity Editor Version  #
+# ===================== #
+/[Pp]roject[Ss]ettings/ProjectVersion.txt
+/[Pp]roject[Ss]ettings/EditorBuildSettings.asset
+/[Pp]roject[Ss]ettings/EditorSettings.asset
+/[Pp]roject[Ss]ettings/InputManager.asset
+/[Pp]roject[Ss]ettings/NavMeshAreas.asset
+/[Pp]roject[Ss]ettings/Physics2DSettings.asset
+/[Pp]roject[Ss]ettings/PresetManager.asset
+/[Pp]roject[Ss]ettings/ProjectSettings.asset
+/[Pp]roject[Ss]ettings/QualitySettings.asset
+/[Pp]roject[Ss]ettings/TagManager.asset
+/[Pp]roject[Ss]ettings/TimeManager.asset
+/[Pp]roject[Ss]ettings/UnityConnectSettings.asset
+/[Pp]roject[Ss]ettings/VFXManager.asset
+/[Pp]roject[Ss]ettings/AudioManager.asset
+/[Pp]roject[Ss]ettings/ClusterInputManager.asset
+/[Pp]roject[Ss]ettings/DynamicsManager.asset
+/[Pp]roject[Ss]ettings/EditorBuildSettings.asset
