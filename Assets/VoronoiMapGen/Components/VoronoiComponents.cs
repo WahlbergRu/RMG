@@ -1,5 +1,6 @@
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Rendering;
 
 namespace VoronoiMapGen.Components
 {
@@ -50,6 +51,16 @@ namespace VoronoiMapGen.Components
     {
     }
     
+    // Сохраняем 2D-полигон ячейки (в мировых XZ, Y = 0 на стадии рендера)
+    [InternalBufferCapacity(6)]
+    public struct CellPolygonVertex : IBufferElementData
+    {
+        public float2 Value;
+    }
     
+    public struct CellDirtyFlag : IComponentData {} // наличие = меш устарел
+        
+    [MaterialProperty("_BaseColor")]
+    public struct CellColor : IComponentData { public float4 Value; }
 
 }
