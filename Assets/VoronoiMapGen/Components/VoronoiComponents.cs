@@ -40,4 +40,16 @@ namespace VoronoiMapGen.Components
         public Entity NeighborTriangle;
         public int SharedEdge;
     }
+    
+    // Тег, чтобы не пересоздавать меш
+    public struct VoronoiCellMeshTag : IComponentData
+    {}
+
+    // Тег, чтобы отслеживать, что мешы сгенерированы
+    public struct VoronoiMeshGeneratedTag : IComponentData
+    {
+    }
+    
+    
+
 }
