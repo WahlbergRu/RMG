@@ -1,160 +1,231 @@
-﻿using Unity.Collections;
+﻿using System.Collections.Generic;
+using Unity.Burst;
+using Unity.Collections;
 using Unity.Entities;
+using Unity.Entities.Graphics;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
+using UnityEngine.Rendering;
+using VoronoiMapGen.Components;
 
 namespace VoronoiMapGen.Mesh
 {
+    [WorldSystemFilter(WorldSystemFilterFlags.Presentation)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    [UpdateAfter(typeof(VoronoiMapGen.Systems.MapGenerationSystem))]
-    public partial class VoronoiMeshSystem : SystemBase
+    public partial struct VoronoiMeshSystem : ISystem
     {
+        private static Material _defaultMaterial;
         private EntityQuery _cellQuery;
-        private EntityQuery _edgeQuery;
         private EntityQuery _siteQuery;
-        private EntityQuery _mapGeneratedQuery;
-        private bool meshesGenerated = false;
+        private EntityQuery _edgeQuery;
 
-        protected override void OnCreate()
+        [BurstCompile]
+        public void OnCreate(ref SystemState state)
         {
-            _cellQuery = GetEntityQuery(ComponentType.ReadOnly<Components.VoronoiCell>());
-            _edgeQuery = GetEntityQuery(ComponentType.ReadOnly<Components.VoronoiEdge>());
-            _siteQuery = GetEntityQuery(ComponentType.ReadOnly<Components.VoronoiSite>());
-            _mapGeneratedQuery = GetEntityQuery(ComponentType.ReadOnly<Components.MapGeneratedTag>());
+            _defaultMaterial = EnsureDefaultMaterial();
+
+            _cellQuery = SystemAPI.QueryBuilder().WithAll<VoronoiCell>().Build();
+            _siteQuery = SystemAPI.QueryBuilder().WithAll<VoronoiSite>().Build();
+            _edgeQuery = SystemAPI.QueryBuilder().WithAll<VoronoiEdge>().Build();
         }
 
-        protected override void OnUpdate()
+        [BurstCompile]
+        public void OnDestroy(ref SystemState state)
         {
-            if (meshesGenerated || _mapGeneratedQuery.IsEmpty)
+            // Очистка ресурсов при необходимости
+        }
+
+        public void OnUpdate(ref SystemState state)
+        {
+            state.RequireForUpdate(_cellQuery);
+            state.RequireForUpdate(_siteQuery);
+            state.RequireForUpdate(_edgeQuery);
+
+            // Карта ещё не готова
+            if (!SystemAPI.HasSingleton<MapGeneratedTag>())
                 return;
 
-            // Ждем завершения генерации карты
-            GenerateCellMeshes();
-            meshesGenerated = true;
-        }
+            // Меши уже построены
+            if (SystemAPI.HasSingleton<VoronoiMeshGeneratedTag>())
+                return;
 
-        private void GenerateCellMeshes()
-        {
-            Debug.Log("Generating Voronoi cell meshes...");
+            Debug.Log("VoronoiMeshSystem: Building Voronoi meshes...");
 
-            // Получаем все данные
-            var cells = _cellQuery.ToComponentDataArray<Components.VoronoiCell>(Allocator.TempJob);
-            var sites = _siteQuery.ToComponentDataArray<Components.VoronoiSite>(Allocator.TempJob);
-            var edges = _edgeQuery.ToComponentDataArray<Components.VoronoiEdge>(Allocator.TempJob);
+            using var cells = _cellQuery.ToComponentDataArray<VoronoiCell>(Allocator.TempJob);
+            using var sites = _siteQuery.ToComponentDataArray<VoronoiSite>(Allocator.TempJob);
+            using var edges = _edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.TempJob);
 
-            // Создаем меш для каждой ячейки
-            for (int i = 0; i < cells.Length; i++)
+            // Словарь siteIndex → position
+            var siteLookup = new NativeParallelHashMap<int, float2>(sites.Length, Allocator.Temp);
+            foreach (var site in sites)
+                siteLookup[site.Index] = site.Position;
+
+            foreach (var cell in cells)
             {
-                var cell = cells[i];
-                
-                // Находим сайт для этой ячейки
-                float2 sitePosition = new float2(0, 0);
-                for (int j = 0; j < sites.Length; j++)
+                if (!siteLookup.TryGetValue(cell.SiteIndex, out var sitePosition))
                 {
-                    if (sites[j].Index == cell.SiteIndex)
-                    {
-                        sitePosition = sites[j].Position;
-                        break;
-                    }
+                    Debug.LogWarning($"[VoronoiMeshSystem] Missing site {cell.SiteIndex} for cell");
+                    continue;
                 }
 
-                CreateCellMeshEntity(cell, sitePosition, edges);
+                CreateCellEntity(ref state, in cell, sitePosition, edges);
             }
-            
-            cells.Dispose();
-            sites.Dispose();
-            edges.Dispose();
+
+            // Отмечаем, что меши построены
+            state.EntityManager.CreateSingleton(new VoronoiMeshGeneratedTag());
+
+            siteLookup.Dispose();
         }
 
-        private void CreateCellMeshEntity(Components.VoronoiCell cell, float2 sitePosition, NativeArray<Components.VoronoiEdge> allEdges)
+        /// <summary>
+        /// Создаёт entity для визуализации одной ячейки.
+        /// </summary>
+        private void CreateCellEntity(
+            ref SystemState state,
+            in VoronoiCell cell,
+            float2 sitePosition,
+            NativeArray<VoronoiEdge> allEdges)
         {
-            // Создаем новую сущность для меша
-            var meshEntity = EntityManager.CreateEntity();
-            
-            // Добавляем компоненты трансформации
-            EntityManager.AddComponentData(meshEntity, new LocalTransform
+            var mesh = BuildCellMesh(cell, allEdges);
+            if (mesh == null || mesh.vertexCount < 3)
             {
-                Position = new float3(sitePosition.x, sitePosition.y, 0),
+                Debug.LogError($"[VoronoiMeshSystem] Failed to build mesh for site {cell.SiteIndex}");
+                return;
+            }
+
+            var entity = state.EntityManager.CreateEntity();
+
+            // Локальная трансформация
+            state.EntityManager.AddComponentData(entity, new LocalTransform
+            {
+                Position = new float3(sitePosition.x, 0f, sitePosition.y),
                 Rotation = quaternion.identity,
-                Scale = 1.0f
+                Scale = 1f
             });
 
-            // Добавляем тег меша
-            EntityManager.AddComponentData(meshEntity, new VoronoiMeshTag
-            {
-                CellIndex = cell.SiteIndex
-            });
+            state.EntityManager.AddComponentData(entity, new VoronoiCellMeshTag());
 
-            // Создаем и добавляем меш через BlobAssetReference (новый способ)
-            var mesh = CreateCellMesh(cell, sitePosition, allEdges);
-            if (mesh != null)
-            {
-                // Создаем RenderMeshArray для нового API
-                var meshArray = new RenderMeshArray(new[] { mesh }, new[] { GetDefaultMaterial() });
-                
-                EntityManager.AddComponentData(meshEntity, new RenderMeshArrayComponent
-                {
-                    RenderMeshArray = meshArray,
-                    MaterialIndices = new int[] { 0 },
-                    MeshIndices = new int[] { 0 }
-                });
-            }
+            // Настраиваем рендер
+            var desc = new RenderMeshDescription(
+                shadowCastingMode: ShadowCastingMode.On,
+                receiveShadows: true);
+
+            var meshArray = new RenderMeshArray(
+                new[] { _defaultMaterial },
+                new[] { mesh });
+
+            var meshInfo = MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0);
+            RenderMeshUtility.AddComponents(entity, state.EntityManager, in desc, meshArray, meshInfo);
         }
 
-        private UnityEngine.Mesh CreateCellMesh(Components.VoronoiCell cell, float2 sitePosition, NativeArray<Components.VoronoiEdge> allEdges)
+        /// <summary>
+        /// Генерирует меш полигона для ячейки.
+        /// </summary>
+        private static UnityEngine.Mesh BuildCellMesh(VoronoiCell cell, NativeArray<VoronoiEdge> edges)
         {
-            // Собираем ребра, принадлежащие этой ячейке
-            var cellEdges = new NativeList<Components.VoronoiEdge>(32, Allocator.Temp);
-            
-            for (int i = 0; i < allEdges.Length; i++)
+            var vertices = new NativeList<float2>(16, Allocator.Temp);
+            var unique = new NativeHashSet<ulong>(16, Allocator.Temp);
+
+            // Собираем вершины из рёбер
+            foreach (var edge in edges)
             {
-                var edge = allEdges[i];
-                if (edge.SiteA == cell.SiteIndex || edge.SiteB == cell.SiteIndex)
-                {
-                    cellEdges.Add(edge);
-                }
+                if (edge.SiteA != cell.SiteIndex && edge.SiteB != cell.SiteIndex)
+                    continue;
+
+                TryAddVertex(edge.VertexA, vertices, unique);
+                TryAddVertex(edge.VertexB, vertices, unique);
             }
 
-            // Если нет ребер, создаем простой квадрат
-            if (cellEdges.Length == 0)
+            if (vertices.Length < 3)
             {
-                cellEdges.Dispose();
-                return MeshGenerationUtility.CreateQuadMesh(1.0f, 1.0f);
+                unique.Dispose();
+                vertices.Dispose();
+                return MeshGenerationUtility.CreateQuadMesh(0.5f, 0.5f);
             }
 
-            // Создаем меш из ребер (пока упрощенная версия)
-            var mesh = MeshGenerationUtility.CreateQuadMesh(1.0f, 1.0f);
-            
-            cellEdges.Dispose();
+            // Сортируем по часовой стрелке
+            vertices.Sort(new ClockwiseComparer(cell.Centroid));
+
+            var verts3D = new NativeList<Vector3>(vertices.Length, Allocator.Temp);
+            foreach (var v in vertices)
+                verts3D.Add(new Vector3(v.x, 0f, v.y));
+
+            var tris = new NativeList<int>(Allocator.Temp);
+            for (int i = 1; i < verts3D.Length - 1; i++)
+            {
+                tris.Add(0);
+                tris.Add(i);
+                tris.Add(i + 1);
+            }
+
+            var mesh = new UnityEngine.Mesh
+            {
+                indexFormat = IndexFormat.UInt32
+            };
+            mesh.SetVertices(verts3D.AsArray());
+            mesh.SetIndices(tris.AsArray(), MeshTopology.Triangles, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateTangents();
+            mesh.RecalculateBounds();
+
+            // Освобождаем ресурсы
+            unique.Dispose();
+            vertices.Dispose();
+            verts3D.Dispose();
+            tris.Dispose();
+
             return mesh;
         }
 
-        private Material GetDefaultMaterial()
+        private static void TryAddVertex(float2 v, NativeList<float2> list, NativeHashSet<ulong> unique)
         {
-            var shader = Shader.Find("Standard");
-            if (shader == null)
-            {
-                shader = Shader.Find("Universal Render Pipeline/Lit");
-            }
-            
-            var material = new Material(shader);
-            material.color = new Color(
-                UnityEngine.Random.Range(0.3f, 0.8f),
-                UnityEngine.Random.Range(0.3f, 0.8f),
-                UnityEngine.Random.Range(0.3f, 0.8f)
-            );
-            return material;
+            var hash = HashVertex(v);
+            if (unique.Add(hash))
+                list.Add(v);
         }
-    }
 
-    // Компонент для нового RenderMesh API
-    public struct RenderMeshArrayComponent : IComponentData
-    {
-        public RenderMeshArray RenderMeshArray;
-        
-        public int[] MaterialIndices;
-        public int[] MeshIndices;
+        private static ulong HashVertex(float2 v) =>
+            ((ulong)Mathf.FloatToHalf(v.x) << 16) | (ushort)Mathf.FloatToHalf(v.y);
+
+        private static Material EnsureDefaultMaterial()
+        {
+            if (_defaultMaterial != null)
+                return _defaultMaterial;
+
+            var shader = Shader.Find("Universal Render Pipeline/Lit")
+                        ?? Shader.Find("Standard")
+                        ?? Shader.Find("Legacy Shaders/Diffuse");
+
+            if (shader == null)
+                Debug.LogError("[VoronoiMeshSystem] No suitable shader found!");
+
+            _defaultMaterial = new Material(shader)
+            {
+                color = new Color(
+                    UnityEngine.Random.value * 0.5f + 0.5f,
+                    UnityEngine.Random.value * 0.5f + 0.5f,
+                    UnityEngine.Random.value * 0.5f + 0.5f
+                )
+            };
+
+            return _defaultMaterial;
+        }
+
+        private struct ClockwiseComparer : IComparer<float2>
+        {
+            private readonly float2 _center;
+
+            public ClockwiseComparer(float2 center) => _center = center;
+
+            public int Compare(float2 a, float2 b)
+            {
+                var da = a - _center;
+                var db = b - _center;
+                var angle = math.atan2(da.y, da.x) - math.atan2(db.y, db.x);
+                return angle > 0 ? -1 : (angle < 0 ? 1 : 0);
+            }
+        }
     }
 }

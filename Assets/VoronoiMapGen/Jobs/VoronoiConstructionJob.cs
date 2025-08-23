@@ -28,7 +28,7 @@ namespace VoronoiMapGen.Jobs
                 });
             }
 
-            // Простой подход: создаем ребра между всеми парами треугольников с общими вершинами
+            // Создаем ребра между соседними треугольниками
             for (int i = 0; i < Triangles.Length; i++)
             {
                 for (int j = i + 1; j < Triangles.Length; j++)
@@ -36,7 +36,7 @@ namespace VoronoiMapGen.Jobs
                     var tri1 = Triangles[i];
                     var tri2 = Triangles[j];
 
-                    // Проверяем, являются ли треугольники соседними (имеют 2 общие вершины)
+                    // Проверяем, являются ли треугольники соседними
                     if (ShareEdge(tri1, tri2, out int siteA, out int siteB))
                     {
                         if (siteA != -1 && siteB != -1)
@@ -62,25 +62,43 @@ namespace VoronoiMapGen.Jobs
             siteB = -1;
             int sharedCount = 0;
 
-            // Проверяем все вершины первого треугольника
-            int[] vertsA = { a.A, a.B, a.C };
-            int[] vertsB = { b.A, b.B, b.C };
+            // Сравниваем все вершины напрямую (без managed arrays)
+            // Вершины треугольника a
+            int vertA1 = a.A;
+            int vertA2 = a.B;
+            int vertA3 = a.C;
+            
+            // Вершины треугольника b
+            int vertB1 = b.A;
+            int vertB2 = b.B;
+            int vertB3 = b.C;
 
-            // Считаем общие вершины
-            for (int i = 0; i < 3; i++)
+            // Проверяем все комбинации
+            if (vertA1 == vertB1 || vertA1 == vertB2 || vertA1 == vertB3)
             {
-                for (int j = 0; j < 3; j++)
-                {
-                    if (vertsA[i] == vertsB[j])
-                    {
-                        sharedCount++;
-                        if (sharedCount == 1)
-                            siteA = vertsA[i];
-                        else if (sharedCount == 2)
-                            siteB = vertsA[i];
-                        break;
-                    }
-                }
+                if (sharedCount == 0)
+                    siteA = vertA1;
+                else if (sharedCount == 1)
+                    siteB = vertA1;
+                sharedCount++;
+            }
+
+            if (vertA2 == vertB1 || vertA2 == vertB2 || vertA2 == vertB3)
+            {
+                if (sharedCount == 0)
+                    siteA = vertA2;
+                else if (sharedCount == 1)
+                    siteB = vertA2;
+                sharedCount++;
+            }
+
+            if (vertA3 == vertB1 || vertA3 == vertB2 || vertA3 == vertB3)
+            {
+                if (sharedCount == 0)
+                    siteA = vertA3;
+                else if (sharedCount == 1)
+                    siteB = vertA3;
+                sharedCount++;
             }
 
             return sharedCount >= 2;
