@@ -1,5 +1,6 @@
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Rendering;
 
 namespace VoronoiMapGen.Components
 {
@@ -49,7 +50,4 @@ namespace VoronoiMapGen.Components
     public struct VoronoiMeshGeneratedTag : IComponentData
     {
     }
-    
-    
-
 }
