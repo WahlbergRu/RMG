@@ -11,6 +11,14 @@ namespace VoronoiMapGen.Bootstrap
         public int SiteCount = 100;
         public Vector2 MapSize = new Vector2(100, 100);
 
+        [Header("Rendering Settings")]
+        public float EdgeWidth = 0.1f;
+        public float RoadWidth = 0.8f;
+        public Color RoadColor = Color.yellow;
+        public Color BorderColor = Color.blue;
+        public bool DrawRoads = true;
+        public bool DrawBorders = true;
+
         void Start()
         {
             var world = World.DefaultGameObjectInjectionWorld;
@@ -29,6 +37,18 @@ namespace VoronoiMapGen.Bootstrap
                 SiteCount = SiteCount,
                 MapSize = MapSize,
                 IsGenerated = false
+            });
+
+            var settingsEntity = entityManager.CreateEntity();
+            entityManager.AddComponentData(settingsEntity, new MapRenderingSettings
+            {
+                EdgeWidth = EdgeWidth,
+                RoadWidth = RoadWidth,
+                RoadColor = RoadColor,
+                BorderColor = BorderColor,
+                DrawRoads = DrawRoads,
+                DrawBorders = DrawBorders,
+                MapSize = MapSize
             });
         }
     }

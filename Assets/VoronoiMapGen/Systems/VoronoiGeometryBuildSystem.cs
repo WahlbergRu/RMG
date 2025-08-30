@@ -5,7 +5,6 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 using VoronoiMapGen.Components;
-using VoronoiMapGen.Mesh;
 
 namespace VoronoiMapGen.Systems
 {

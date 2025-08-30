@@ -1,6 +1,7 @@
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Rendering;
+using UnityEngine;
 
 namespace VoronoiMapGen.Components
 {
@@ -45,5 +46,19 @@ namespace VoronoiMapGen.Components
     // Тег, чтобы отслеживать, что мешы сгенерированы
     public struct VoronoiMeshGeneratedTag : IComponentData
     {
+    }
+    
+    public struct RoadEntityTag : IComponentData { }
+    public struct BorderEntityTag : IComponentData { }
+    
+    public struct MapRenderingSettings : IComponentData
+    {
+        public float EdgeWidth;
+        public float RoadWidth;
+        public Color RoadColor;
+        public Color BorderColor;
+        public bool DrawRoads;
+        public bool DrawBorders;
+        public Vector2 MapSize;
     }
 }
