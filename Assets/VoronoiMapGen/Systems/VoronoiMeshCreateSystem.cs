@@ -1,9 +1,9 @@
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Entities.Graphics;
-using Unity.Mathematics;
 using Unity.Rendering;
+using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -12,133 +12,146 @@ using VoronoiMapGen.Components;
 namespace VoronoiMapGen.Systems
 {
     /// <summary>
-    /// Первый проход рендера: создаёт по entity уникальный Mesh через MeshData,
-    /// вешает RenderMeshArray+MaterialMeshInfo и индивидуальный цвет URP (белый по умолчанию).
+    /// Система, создающая меш и рендер-компоненты для ячейки Вороного ТОЛЬКО ОДИН РАЗ.
+    /// После этого меш может быть обновлён VoronoiMeshUpdateSystem.
     /// </summary>
-    [WorldSystemFilter(WorldSystemFilterFlags.Presentation)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    [UpdateAfter(typeof(VoronoiGeometryBuildSystem))]
-    public partial struct VoronoiMeshCreateSystem : ISystem
+    public partial class VoronoiMeshCreateSystem : SystemBase
     {
-        private static Material s_DefaultMaterial;
+        private Material _material;
 
-        [BurstCompile]
-        public void OnCreate(ref SystemState state)
+        protected override void OnCreate()
         {
-            s_DefaultMaterial ??= EnsureDefaultMaterial();
+            // Загружаем материал
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+            {
+                Debug.LogError("Shader 'Universal Render Pipeline/Lit' not found.");
+                return;
+            }
+
+            _material = new Material(shader) { name = "VoronoiCellMaterial" };
+
+            // Требуем обновления
+            RequireForUpdate<CellPolygonVertex>();
+            RequireForUpdate<CellTriIndex>();
         }
 
-        [BurstCompile]
-        public void OnUpdate(ref SystemState state)
+        protected override void OnUpdate()
         {
-            if (!SystemAPI.HasSingleton<MapGeneratedTag>()) return;
-            if (SystemAPI.HasSingleton<VoronoiMeshGeneratedTag>()) return;
-
-            var query = SystemAPI.QueryBuilder()
-                .WithAll<VoronoiCell, CellPolygonVertex, CellTriIndex>()
-                .WithNone<VoronoiCellMeshTag>()
-                .Build();
+            // Ищем ячейки, у которых есть данные, но ещё нет метки меша
+            var query = GetEntityQuery(
+                ComponentType.ReadOnly<CellPolygonVertex>(),
+                ComponentType.ReadOnly<CellTriIndex>(),
+                ComponentType.ReadOnly<VoronoiCell>(),
+                ComponentType.Exclude<VoronoiCellMeshTag>());
 
             using var entities = query.ToEntityArray(Allocator.Temp);
             if (entities.Length == 0) return;
 
-            // siteIndex -> pos
-            var siteQ = SystemAPI.QueryBuilder().WithAll<VoronoiSite>().Build();
-            using var sites = siteQ.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
-            var sitePos = new NativeParallelHashMap<int, float2>(sites.Length, Allocator.Temp);
-            foreach (var s in sites) sitePos[s.Index] = s.Position;
-
-            // пакетно готовим MeshData
-            var mda = UnityEngine.Mesh.AllocateWritableMeshData(entities.Length);
-            var meshes = new UnityEngine.Mesh[entities.Length];
+            // Собираем ТОЛЬКО валидные сущности и мешы
+            var validEntities = new List<Entity>();
+            var validMeshes = new List<UnityEngine.Mesh>();
 
             for (int i = 0; i < entities.Length; i++)
             {
-                var e = entities[i];
-                var verts = state.EntityManager.GetBuffer<CellPolygonVertex>(e);
-                var triPairs = state.EntityManager.GetBuffer<CellTriIndex>(e);
+                Entity entity = entities[i];
+                if (!EntityManager.Exists(entity)) continue;
 
-                var md = mda[i];
-                md.SetVertexBufferParams(verts.Length,
-                    new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
-                md.SetIndexBufferParams(triPairs.Length * 3 / 2, IndexFormat.UInt32);
+                var vertices = EntityManager.GetBuffer<CellPolygonVertex>(entity);
+                var triangles = EntityManager.GetBuffer<CellTriIndex>(entity);
 
-                var vb = md.GetVertexData<Vector3>();
-                for (int v = 0; v < verts.Length; v++)
-                    vb[v] = new Vector3(verts[v].Value.x, 0f, verts[v].Value.y);
-
-                var ib = md.GetIndexData<int>();
-                int idx = 0;
-                for (int t = 0; t < triPairs.Length; t += 2)
+                if (vertices.Length < 3 || triangles.Length < 3)
                 {
-                    ib[idx++] = 0;
-                    ib[idx++] = triPairs[t + 0].Value;
-                    ib[idx++] = triPairs[t + 1].Value;
+                    Debug.LogWarning($"Entity {entity.Index} has invalid mesh data. Skipping.");
+                    continue;
                 }
 
-                md.subMeshCount = 1;
-                md.SetSubMesh(0, new SubMeshDescriptor(0, idx) { topology = MeshTopology.Triangles },
-                              MeshUpdateFlags.DontRecalculateBounds);
+                // Создаём меш
+                var mesh = new UnityEngine.Mesh
+                {
+                    name = $"VoronoiCell_Mesh_{entity.Index}",
+                    indexFormat = IndexFormat.UInt32
+                };
 
-                meshes[i] = new UnityEngine.Mesh { indexFormat = IndexFormat.UInt32 };
+                // Вершины
+                var meshVertices = new Vector3[vertices.Length];
+                for (int j = 0; j < vertices.Length; j++)
+                {
+                    float2 v = vertices[j].Value;
+                    meshVertices[j] = new Vector3(v.x, 0f, v.y);
+                }
+
+                // Индексы
+                var meshIndices = new int[triangles.Length];
+                for (int j = 0; j < triangles.Length; j++)
+                {
+                    meshIndices[j] = triangles[j].Value;
+                }
+
+                mesh.SetVertices(meshVertices);
+                mesh.SetTriangles(meshIndices, 0);
+                mesh.RecalculateBounds();
+                mesh.RecalculateNormals();
+
+                // Добавляем ТОЛЬКО валидные данные
+                validEntities.Add(entity);
+                validMeshes.Add(mesh);
             }
 
-            UnityEngine.Mesh.ApplyAndDisposeWritableMeshData(mda, meshes, MeshUpdateFlags.Default);
+            // Если нет валидных мешей — выходим
+            if (validEntities.Count == 0) return;
 
-            // общий RenderMeshArray: 1 материал, N мешей (индивидуальность — по MeshArrayIndex)
-            var rma = new RenderMeshArray(new[] { s_DefaultMaterial }, meshes);
-            var desc = new RenderMeshDescription(ShadowCastingMode.On, receiveShadows: true);
+            // Преобразуем в массивы
+            var meshesArray = validMeshes.ToArray();
+            var renderMeshArray = new RenderMeshArray(new[] { _material }, meshesArray);
 
-            for (int i = 0; i < entities.Length; i++)
+            // Настройка рендера
+            var renderMeshDesc = new RenderMeshDescription(
+                shadowCastingMode: ShadowCastingMode.On,
+                receiveShadows: true,
+                motionVectorGenerationMode: MotionVectorGenerationMode.Camera
+            );
+
+            // Добавляем компоненты для каждой валидной сущности
+            for (int i = 0; i < validEntities.Count; i++)
             {
-                var e = entities[i];
+                Entity entity = validEntities[i];
+                if (!EntityManager.Exists(entity) || EntityManager.HasComponent<VoronoiCellMeshTag>(entity)) continue;
 
-                // позиция: local override либо позиция сайта
-                float3 pos;
-                if (state.EntityManager.HasComponent<CellLocalPosition>(e))
-                    pos = state.EntityManager.GetComponentData<CellLocalPosition>(e).Value;
-                else
+                // Получаем позицию
+                float3 pos = float3.zero;
+                if (EntityManager.HasComponent<CellLocalPosition>(entity))
                 {
-                    var siteIndex = state.EntityManager.GetComponentData<VoronoiCell>(e).SiteIndex;
-                    sitePos.TryGetValue(siteIndex, out var sp);
-                    pos = new float3(sp.x, 0f, sp.y);
+                    pos = EntityManager.GetComponentData<CellLocalPosition>(entity).Value;
+                }
+                else if (EntityManager.HasComponent<VoronoiCell>(entity))
+                {
+                    var centroid = EntityManager.GetComponentData<VoronoiCell>(entity).Centroid;
+                    pos = new float3(centroid.x, 0f, centroid.y); // Y=0, Z=вертикальная позиция
                 }
 
-                if (!state.EntityManager.HasComponent<LocalTransform>(e))
-                    state.EntityManager.AddComponentData(e, new LocalTransform
-                    {
-                        Position = pos,
-                        Rotation = quaternion.identity,
-                        Scale = 1f
-                    });
+                // Добавляем компоненты через утилиту
+                RenderMeshUtility.AddComponents(
+                    entity,
+                    EntityManager,
+                    renderMeshDesc,
+                    renderMeshArray,
+                    MaterialMeshInfo.FromRenderMeshArrayIndices(0, i) // i — индекс в validMeshes
+                );
 
-                // индивидуальный цвет (URP property)
-                if (!state.EntityManager.HasComponent<Unity.Rendering.URPMaterialPropertyBaseColor>(e))
-                    state.EntityManager.AddComponentData(e, new Unity.Rendering.URPMaterialPropertyBaseColor
-                    {
-                        Value = new float4(1, 1, 1, 1)
-                    });
+                // Устанавливаем цвет материала
+                if (!EntityManager.HasComponent<URPMaterialPropertyBaseColor>(entity))
+                {
+                    EntityManager.AddComponentData(entity, new URPMaterialPropertyBaseColor { Value = new float4(1, 1, 1, 1) });
+                }
 
-                state.EntityManager.AddComponent<VoronoiCellMeshTag>(e);
+                // Устанавливаем трансформацию (через LocalToWorld)
+                EntityManager.SetComponentData(entity, new LocalToWorld { Value = float4x4.Translate(pos) });
 
-                // привязка меша i в RenderMeshArray
-                var mmi = MaterialMeshInfo.FromRenderMeshArrayIndices(0, i);
-                RenderMeshUtility.AddComponents(e, state.EntityManager, in desc, rma, mmi);
+                // Добавляем метку, что меш создан
+                EntityManager.AddComponent<VoronoiCellMeshTag>(entity);
             }
-
-            // помечаем, что всё создано
-            var tag = state.EntityManager.CreateEntity();
-            state.EntityManager.AddComponent<VoronoiMeshGeneratedTag>(tag);
-
-            sitePos.Dispose();
-        }
-
-        private static Material EnsureDefaultMaterial()
-        {
-            var shader = Shader.Find("Universal Render Pipeline/Lit")
-                ?? Shader.Find("Standard")
-                ?? Shader.Find("Legacy Shaders/Diffuse");
-            return new Material(shader);
         }
     }
 }
