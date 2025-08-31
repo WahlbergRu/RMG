@@ -30,5 +30,5 @@ namespace VoronoiMapGen.Components
     }
     
     public struct GeometryBuiltTag : IComponentData { }
-    
+     
 }
