@@ -28,4 +28,7 @@ namespace VoronoiMapGen.Components
     {
         public float3 Value;
     }
+    
+    public struct GeometryBuiltTag : IComponentData { }
+     
 }
