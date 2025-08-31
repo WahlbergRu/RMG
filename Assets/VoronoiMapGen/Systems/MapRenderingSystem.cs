@@ -17,51 +17,19 @@ namespace VoronoiMapGen.Systems
         private Material _cellMaterial;
         private Material _roadMaterial;
         private Material _borderMaterial;
-        private bool _hasSpawnedCells;
-        private bool _hasSpawnedRoads;
+
+        private bool _cellsSpawned;
+        private bool _roadsSpawned;
 
         protected override void OnCreate()
         {
-            // Материал для ячеек (биомы)
-            var cellShader = Shader.Find("Universal Render Pipeline/Lit");
-            if (cellShader == null)
-            {
-                Debug.LogError("URP Lit shader not found! Ensure URP is installed.");
-            }
-            else
-            {
-                _cellMaterial = new Material(cellShader)
-                {
-                    name = "CellMaterial",
-                    enableInstancing = true
-                };
-            }
+            _cellMaterial   = CreateMaterial("Universal Render Pipeline/Lit",  "CellMaterial",   true);
+            _roadMaterial   = CreateMaterial("Universal Render Pipeline/Unlit","RoadMaterial",   true, Color.yellow);
+            _borderMaterial = CreateMaterial("Universal Render Pipeline/Unlit","BorderMaterial", true, Color.blue);
 
-            // Материалы для дорог и границ
-            var unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (unlitShader == null)
-            {
-                Debug.LogError("URP Unlit shader not found! Ensure URP is installed.");
-                return;
-            }
+            if (_roadMaterial   != null) _roadMaterial.SetInt("_Cull",   (int)CullMode.Off);
+            if (_borderMaterial != null) _borderMaterial.SetInt("_Cull", (int)CullMode.Off);
 
-            _roadMaterial = new Material(unlitShader)
-            {
-                name = "RoadMaterial",
-                color = Color.yellow,
-                enableInstancing = true
-            };
-            _roadMaterial.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
-
-            _borderMaterial = new Material(unlitShader)
-            {
-                name = "BorderMaterial",
-                color = Color.blue,
-                enableInstancing = true
-            };
-            _borderMaterial.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
-
-            // Требуем данные для всех этапов
             RequireForUpdate<MapRenderingSettings>();
             RequireForUpdate<VoronoiCell>();
             RequireForUpdate<VoronoiEdge>();
@@ -72,336 +40,301 @@ namespace VoronoiMapGen.Systems
         protected override void OnUpdate()
         {
             if (!SystemAPI.HasSingleton<MapGeneratedTag>()) return;
-            
-            var settings = SystemAPI.GetSingleton<MapRenderingSettings>();
-            var mapSize = settings.MapSize;
-            var entityManager = EntityManager;
 
-            // ===== ЭТАП 1: СОЗДАЁМ МЕШИ ЯЧЕЕК =====
-            if (!_hasSpawnedCells)
+            var settings = SystemAPI.GetSingleton<MapRenderingSettings>();
+
+            if (!_cellsSpawned)
             {
-                CreateCellMeshes();
-                _hasSpawnedCells = true;
+                BuildCellMeshes();
+                _cellsSpawned = true;
             }
 
-            // ===== ЭТАП 2: СОЗДАЁМ ДОРОГИ И ГРАНИЦЫ =====
-            if (!_hasSpawnedRoads)
+            if (!_roadsSpawned)
             {
-                CreateRoadsAndBorders(settings, mapSize);
-                _hasSpawnedRoads = true;
+                BuildRoadsAndBorders(settings);
+                _roadsSpawned = true;
             }
         }
-        
-        private void CreateCellMeshes()
+
+        #region Materials
+        private Material CreateMaterial(string shaderName, string name, bool instancing, Color? color = null)
         {
-            var cellQuery = GetEntityQuery(
+            var shader = Shader.Find(shaderName);
+            if (shader == null)
+            {
+                Debug.LogError($"Shader '{shaderName}' not found! Ensure URP is installed.");
+                return null;
+            }
+
+            var mat = new Material(shader)
+            {
+                name = name,
+                enableInstancing = instancing
+            };
+
+            if (color.HasValue) mat.color = color.Value;
+            return mat;
+        }
+        #endregion
+
+        #region Cells (local vertices + centroid position)
+        private void BuildCellMeshes()
+        {
+            var query = GetEntityQuery(
                 ComponentType.ReadOnly<CellPolygonVertex>(),
                 ComponentType.ReadOnly<CellTriIndex>(),
                 ComponentType.ReadOnly<VoronoiCell>(),
                 ComponentType.Exclude<VoronoiCellMeshTag>());
 
-            using var entities = cellQuery.ToEntityArray(Allocator.Temp);
+            using var entities = query.ToEntityArray(Allocator.Temp);
             if (entities.Length == 0) return;
 
-            var validEntities = new List<Entity>();
-            var validMeshes = new List<Mesh>();
+            var meshes   = new List<Mesh>();
+            var cellList = new List<Entity>();
 
-            for (int i = 0; i < entities.Length; i++)
+            foreach (var entity in entities)
             {
-                Entity entity = entities[i];
                 if (!EntityManager.Exists(entity)) continue;
 
-                var vertices = EntityManager.GetBuffer<CellPolygonVertex>(entity);
-                var triangles = EntityManager.GetBuffer<CellTriIndex>(entity);
+                var verts = EntityManager.GetBuffer<CellPolygonVertex>(entity);
+                var tris  = EntityManager.GetBuffer<CellTriIndex>(entity);
 
-                if (vertices.Length < 3 || triangles.Length < 3) continue;
+                if (verts.Length < 3 || tris.Length < 3) continue;
 
-                // Создаём меш
-                var mesh = new Mesh
-                {
-                    name = $"CellMesh_{entity.Index}",
-                    indexFormat = IndexFormat.UInt32
-                };
-
-                // Вершины
-                var meshVertices = new Vector3[vertices.Length];
-                for (int j = 0; j < vertices.Length; j++)
-                {
-                    float2 v = vertices[j].Value;
-                    meshVertices[j] = new Vector3(v.x, 0f, v.y);
-                }
-
-                // Индексы
-                var meshIndices = new int[triangles.Length];
-                for (int j = 0; j < triangles.Length; j++)
-                {
-                    meshIndices[j] = triangles[j].Value;
-                }
-
-                mesh.SetVertices(meshVertices);
-                mesh.SetTriangles(meshIndices, 0);
-                mesh.RecalculateBounds();
-                mesh.RecalculateNormals();
-
-                // Добавляем в список
-                validEntities.Add(entity);
-                validMeshes.Add(mesh);
+                meshes.Add(CreateMeshFromCellLocal(entity, verts, tris));
+                cellList.Add(entity);
             }
 
-            if (validEntities.Count == 0) return;
+            if (cellList.Count == 0) return;
 
-            // Настраиваем рендер
-            var renderMeshArray = new RenderMeshArray(new[] { _cellMaterial }, validMeshes.ToArray());
-            var renderMeshDesc = new RenderMeshDescription(
-                shadowCastingMode: ShadowCastingMode.On,
-                receiveShadows: true
-            );
+            var renderMeshArray = new RenderMeshArray(new[] { _cellMaterial }, meshes.ToArray());
+            var desc = new RenderMeshDescription(ShadowCastingMode.On, true);
 
-            // Добавляем компоненты
-            for (int i = 0; i < validEntities.Count; i++)
-            {
-                Entity entity = validEntities[i];
-                if (!EntityManager.Exists(entity)) continue;
-
-                float3 pos = float3.zero;
-                if (EntityManager.HasComponent<CellLocalPosition>(entity))
-                {
-                    pos = EntityManager.GetComponentData<CellLocalPosition>(entity).Value;
-                }
-                else
-                {
-                    var centroid = EntityManager.GetComponentData<VoronoiCell>(entity).Centroid;
-                    pos = new float3(centroid.x, 0f, centroid.y);
-                }
-
-                RenderMeshUtility.AddComponents(
-                    entity,
-                    EntityManager,
-                    renderMeshDesc,
-                    renderMeshArray,
-                    MaterialMeshInfo.FromRenderMeshArrayIndices(0, i)
-                );
-
-                // Устанавливаем цвет биома
-                if (EntityManager.HasComponent<CellBiome>(entity))
-                {
-                    var biome = EntityManager.GetComponentData<CellBiome>(entity);
-                    float4 color = GetBiomeColor(biome.Type);
-                    EntityManager.AddComponentData(entity, new URPMaterialPropertyBaseColor { Value = color });
-                }
-
-                // 🔑 ИСПРАВЛЕНИЕ: Используем AddComponentData вместо SetComponentData
-                EntityManager.AddComponentData(entity, new LocalTransform
-                {
-                    Position = pos,
-                    Rotation = quaternion.identity,
-                    Scale = 1f
-                });
-                
-                EntityManager.AddComponent<VoronoiCellMeshTag>(entity);
-            }
+            for (int i = 0; i < cellList.Count; i++)
+                SetupCellEntity(cellList[i], renderMeshArray, desc, i);
         }
 
-        private void CreateRoadsAndBorders(MapRenderingSettings settings, float2 mapSize)
+        private Mesh CreateMeshFromCellLocal(Entity entity, DynamicBuffer<CellPolygonVertex> verts, DynamicBuffer<CellTriIndex> tris)
+        {
+            var cell = EntityManager.GetComponentData<VoronoiCell>(entity);
+            var c = cell.Centroid;
+
+            var mesh = new Mesh
+            {
+                name = $"CellMesh_{entity.Index}",
+                indexFormat = IndexFormat.UInt32
+            };
+
+            var vArray = new Vector3[verts.Length];
+            for (int i = 0; i < verts.Length; i++)
+            {
+                float2 v = verts[i].Value;
+                // локаль относительно центроида
+                vArray[i] = new Vector3(v.x - c.x, 0f, v.y - c.y);
+            }
+
+            var tArray = new int[tris.Length];
+            for (int i = 0; i < tris.Length; i++)
+                tArray[i] = tris[i].Value;
+
+            mesh.SetVertices(vArray);
+            mesh.SetTriangles(tArray, 0);
+            mesh.RecalculateBounds();
+            mesh.RecalculateNormals();
+            return mesh;
+        }
+
+        private void SetupCellEntity(Entity entity, RenderMeshArray renderMeshArray, RenderMeshDescription desc, int meshIndex)
+        {
+            if (!EntityManager.Exists(entity)) return;
+
+            float3 pos = EntityManager.HasComponent<CellLocalPosition>(entity)
+                ? EntityManager.GetComponentData<CellLocalPosition>(entity).Value
+                : new float3(EntityManager.GetComponentData<VoronoiCell>(entity).Centroid.x, 0f,
+                             EntityManager.GetComponentData<VoronoiCell>(entity).Centroid.y);
+
+            RenderMeshUtility.AddComponents(entity, EntityManager, desc, renderMeshArray,
+                MaterialMeshInfo.FromRenderMeshArrayIndices(0, meshIndex));
+
+            if (EntityManager.HasComponent<CellBiome>(entity))
+            {
+                var biome = EntityManager.GetComponentData<CellBiome>(entity);
+                EntityManager.AddComponentData(entity, new URPMaterialPropertyBaseColor { Value = BiomeColor(biome.Type) });
+            }
+
+            EntityManager.AddComponentData(entity, LocalTransform.FromPosition(pos));
+            EntityManager.AddComponent<VoronoiCellMeshTag>(entity);
+        }
+        #endregion
+
+        #region Roads & Borders (local verts + center position) - separated processed sets
+        private void BuildRoadsAndBorders(MapRenderingSettings settings)
         {
             var edgeQuery = GetEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
             var cellQuery = GetEntityQuery(ComponentType.ReadOnly<VoronoiCell>());
 
-            if (edgeQuery.CalculateEntityCount() == 0 || cellQuery.CalculateEntityCount() == 0)
-                return;
+            if (edgeQuery.IsEmpty || cellQuery.IsEmpty) return;
 
-            using var edgeComponents = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
-            using var cellComponents = cellQuery.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
+            using var edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
+            using var cells = cellQuery.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
 
-            // ✅ ИСПРАВЛЕНИЕ: Собственная реализация хеша
-            var processedEdges = new HashSet<(int, int)>(edgeComponents.Length * 2, new EdgeComparer());
+            // разделённые множества, чтобы обработка дорог не мешала созданию бордеров
+            var processedRoads = new HashSet<(int, int)>(new EdgeComparer());
+            var processedBorders = new HashSet<(int, int)>(new EdgeComparer());
 
-            // ===== СОЗДАЁМ ДОРОГИ =====
             if (settings.DrawRoads)
-            {
-                foreach (var edge in edgeComponents)
-                {
-                    var siteA = edge.SiteA;
-                    var siteB = edge.SiteB;
+                BuildRoadsLocal(edges, cells, settings, processedRoads);
 
-                    var edgeKey = (math.min(siteA, siteB), math.max(siteA, siteB));
-                    if (processedEdges.Contains(edgeKey)) continue;
-                    processedEdges.Add(edgeKey);
-
-                    VoronoiCell? cellA = null;
-                    VoronoiCell? cellB = null;
-                    for (int i = 0; i < cellComponents.Length; i++)
-                    {
-                        if (cellComponents[i].SiteIndex == siteA) cellA = cellComponents[i];
-                        if (cellComponents[i].SiteIndex == siteB) cellB = cellComponents[i];
-                        if (cellA.HasValue && cellB.HasValue) break;
-                    }
-
-                    if (!cellA.HasValue || !cellB.HasValue) continue;
-
-                    var roadMesh = CreateRoadMesh(cellA.Value.Centroid, cellB.Value.Centroid, settings.RoadWidth);
-                    CreateRenderEntity(roadMesh, _roadMaterial, typeof(RoadEntityTag));
-                }
-            }
-
-            // ===== СОЗДАЁМ ГРАНИЦЫ =====
             if (settings.DrawBorders)
+                BuildBordersLocal(edges, settings, processedBorders);
+        }
+
+        private void BuildRoadsLocal(NativeArray<VoronoiEdge> edges, NativeArray<VoronoiCell> cells,
+                                     MapRenderingSettings settings, HashSet<(int, int)> processedRoads)
+        {
+            foreach (var edge in edges)
             {
-                foreach (var edge in edgeComponents)
-                {
-                    var siteA = edge.SiteA;
-                    var siteB = edge.SiteB;
+                var key = EdgeKey(edge.SiteA, edge.SiteB);
+                if (!processedRoads.Add(key)) continue;
 
-                    var edgeKey = (math.min(siteA, siteB), math.max(siteA, siteB));
-                    if (processedEdges.Contains(edgeKey)) continue;
-                    processedEdges.Add(edgeKey);
+                var cellA = FindCell(cells, edge.SiteA);
+                var cellB = FindCell(cells, edge.SiteB);
+                if (!cellA.HasValue || !cellB.HasValue) continue;
 
-                    var borderMesh = CreateBorderMesh(edge.VertexA, edge.VertexB, settings.EdgeWidth);
-                    CreateRenderEntity(borderMesh, _borderMaterial, typeof(BorderEntityTag));
-                }
+                float2 a = cellA.Value.Centroid;
+                float2 b = cellB.Value.Centroid;
+
+                // центр сегмента в МИРОВЫХ координатах (Y = 0)
+                float3 center = new float3((a.x + b.x) * 0.5f, 0f, (a.y + b.y) * 0.5f);
+
+                // локальный меш относительно центра
+                var mesh = CreateQuadMeshLocal(a, b, center, settings.RoadWidth, "RoadSegment");
+                CreateRoadSegment(mesh, _roadMaterial, center);
             }
         }
 
-        // ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
-        // ✅ ИСПРАВЛЕНИЕ: Возвращаем float4 вместо Color
-        private float4 GetBiomeColor(BiomeType biomeType)
+        private void BuildBordersLocal(NativeArray<VoronoiEdge> edges, MapRenderingSettings settings, HashSet<(int, int)> processedBorders)
         {
-            switch (biomeType)
+            foreach (var edge in edges)
             {
-                case BiomeType.Ocean: return new float4(0.1f, 0.3f, 0.8f, 1.0f);
-                case BiomeType.Coast: return new float4(0.9f, 0.8f, 0.6f, 1.0f);
-                case BiomeType.Ice: return new float4(0.8f, 0.9f, 1.0f, 1.0f);
-                case BiomeType.Desert: return new float4(0.9f, 0.8f, 0.5f, 1.0f);
-                case BiomeType.Grassland: return new float4(0.3f, 0.7f, 0.2f, 1.0f);
-                case BiomeType.Forest: return new float4(0.1f, 0.5f, 0.1f, 1.0f);
-                case BiomeType.Mountain: return new float4(0.5f, 0.4f, 0.3f, 1.0f);
-                case BiomeType.Snow: return new float4(0.95f, 0.95f, 0.95f, 1.0f);
-                default: return new float4(1.0f, 1.0f, 1.0f, 1.0f);
+                var key = EdgeKey(edge.SiteA, edge.SiteB);
+                if (!processedBorders.Add(key)) continue;
+
+                // используем реальные вершины ребра Voronoi (VertexA/B) — они в мировых координатах (float2)
+                float2 vA = edge.VertexA;
+                float2 vB = edge.VertexB;
+
+                float3 center = new float3((vA.x + vB.x) * 0.5f, 0f, (vA.y + vB.y) * 0.5f);
+
+                var mesh = CreateQuadMeshLocal(vA, vB, center, settings.EdgeWidth, "BorderSegment");
+                CreateBorderSegment(mesh, _borderMaterial, center);
             }
         }
 
-        private Mesh CreateRoadMesh(float2 centroidA, float2 centroidB, float roadWidth)
+        private static VoronoiCell? FindCell(NativeArray<VoronoiCell> cells, int siteIndex)
         {
-            var vertices = new List<Vector3>();
-            var triangles = new List<int>();
+            for (int i = 0; i < cells.Length; i++)
+                if (cells[i].SiteIndex == siteIndex) return cells[i];
+            return null;
+        }
+        #endregion
 
-            // Без умножения на mapSize!
-            var scaledA = centroidA;
-            var scaledB = centroidB;
+        #region Mesh helpers (local quad builder) and entity creation (atomic)
+        /// <summary>
+        /// Строит ПРЯМОУГОЛЬНЫЙ сегмент (дорога/бордер) в ЛОКАЛЬНЫХ координатах относительно center.
+        /// Вершины лежат на Y = 0.
+        /// </summary>
+        private Mesh CreateQuadMeshLocal(float2 a, float2 b, float3 centerWorld, float width, string name)
+        {
+            float3 aW = new float3(a.x, 0f, a.y);
+            float3 bW = new float3(b.x, 0f, b.y);
 
-            var dir = math.normalize(scaledB - scaledA);
-            var perp = new float2(-dir.y, dir.x);
-            var halfWidth = roadWidth * 0.5f;
+            float3 aL = aW - centerWorld;
+            float3 bL = bW - centerWorld;
 
-            var leftA = scaledA + perp * halfWidth;
-            var leftB = scaledB + perp * halfWidth;
-            var rightA = scaledA - perp * halfWidth;
-            var rightB = scaledB - perp * halfWidth;
-
-            vertices.Add(new Vector3(leftA.x, 0.01f, leftA.y));
-            vertices.Add(new Vector3(rightA.x, 0.01f, rightA.y));
-            vertices.Add(new Vector3(rightB.x, 0.01f, rightB.y));
-            vertices.Add(new Vector3(leftB.x, 0.01f, leftB.y));
-
-            triangles.Add(0); triangles.Add(1); triangles.Add(3);
-            triangles.Add(1); triangles.Add(2); triangles.Add(3);
-
-            var mesh = new Mesh
+            // защитный случай: если точки совпадают
+            if (math.lengthsq(bL - aL) < 1e-8f)
             {
-                name = "RoadSegment",
-                indexFormat = IndexFormat.UInt32
-            };
-            mesh.SetVertices(vertices);
-            mesh.SetTriangles(triangles, 0);
-            mesh.RecalculateNormals();
-            mesh.RecalculateBounds();
+                // degenerate small quad
+                bL += new float3(0.0001f, 0f, 0f);
+            }
 
+            float3 dir = math.normalize(bL - aL);
+            float3 perp = new float3(-dir.z, 0f, dir.x) * (width * 0.5f);
+
+            var verts = new[]
+            {
+                new Vector3(aL.x + perp.x, 0f, aL.z + perp.z),
+                new Vector3(aL.x - perp.x, 0f, aL.z - perp.z),
+                new Vector3(bL.x - perp.x, 0f, bL.z - perp.z),
+                new Vector3(bL.x + perp.x, 0f, bL.z + perp.z)
+            };
+
+            var tris = new[] { 0, 1, 3, 1, 2, 3 };
+
+            var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32 };
+            mesh.SetVertices(verts);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+            mesh.RecalculateNormals();
             return mesh;
         }
 
-        private Mesh CreateBorderMesh(float2 vertexA, float2 vertexB, float edgeWidth)
+        // --- Atomic creation functions (easy to extract later) ---
+        private void CreateRoadSegment(Mesh mesh, Material material, float3 worldPos)
         {
-            var vertices = new List<Vector3>();
-            var triangles = new List<int>();
-
-            var scaledA = vertexA;
-            var scaledB = vertexB;
-
-            var dir = math.normalize(scaledB - scaledA);
-            var perp = new float2(-dir.y, dir.x);
-            var halfWidth = edgeWidth * 0.5f;
-
-            var leftA = scaledA + perp * halfWidth;
-            var leftB = scaledB + perp * halfWidth;
-            var rightA = scaledA - perp * halfWidth;
-            var rightB = scaledB - perp * halfWidth;
-
-            vertices.Add(new Vector3(leftA.x, 0.01f, leftA.y));
-            vertices.Add(new Vector3(rightA.x, 0.01f, rightA.y));
-            vertices.Add(new Vector3(rightB.x, 0.01f, rightB.y));
-            vertices.Add(new Vector3(leftB.x, 0.01f, leftB.y));
-
-            triangles.Add(0); triangles.Add(1); triangles.Add(3);
-            triangles.Add(1); triangles.Add(2); triangles.Add(3);
-
-            var mesh = new Mesh
-            {
-                name = "BorderSegment",
-                indexFormat = IndexFormat.UInt32
-            };
-            mesh.SetVertices(vertices);
-            mesh.SetTriangles(triangles, 0);
-            mesh.RecalculateNormals();
-            mesh.RecalculateBounds();
-
-            return mesh;
+            // если ты хочешь отличать материал дороги и бордера, можно здесь настроить renderQueue / ztest
+            CreateSegmentEntity(mesh, material, typeof(RoadEntityTag), worldPos);
         }
 
-
-        private void CreateRenderEntity(Mesh mesh, Material material, System.Type tagType)
+        private void CreateBorderSegment(Mesh mesh, Material material, float3 worldPos)
         {
-            var renderMeshArray = new RenderMeshArray(new[] { material }, new[] { mesh });
-            var desc = new RenderMeshDescription(
-                shadowCastingMode: ShadowCastingMode.Off,
-                receiveShadows: false,
-                motionVectorGenerationMode: MotionVectorGenerationMode.Camera
-            );
+            // бордерам можно дать более высокий renderQueue чтобы они визуально были поверх
+            if (material != null) material.renderQueue = (int)RenderQueue.Geometry + 1;
+            CreateSegmentEntity(mesh, material, typeof(BorderEntityTag), worldPos);
+        }
+
+        private void CreateSegmentEntity(Mesh mesh, Material material, System.Type tagType, float3 worldPos)
+        {
+            var array = new RenderMeshArray(new[] { material }, new[] { mesh });
+            var desc  = new RenderMeshDescription(ShadowCastingMode.Off, false, MotionVectorGenerationMode.Camera);
 
             var entity = EntityManager.CreateEntity();
-            
+
             RenderMeshUtility.AddComponents(
                 entity,
                 EntityManager,
                 desc,
-                renderMeshArray,
+                array,
                 MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0)
             );
-            
-            EntityManager.AddComponentData(entity, new LocalTransform
-            {
-                Position = float3.zero,
-                Rotation = quaternion.identity,
-                Scale = 1f
-            });
-            
+
+            EntityManager.AddComponentData(entity, LocalTransform.FromPosition(worldPos));
             EntityManager.AddComponent(entity, ComponentType.FromTypeIndex(TypeManager.GetTypeIndex(tagType)));
         }
+        #endregion
 
-        // ✅ ИСПРАВЛЕНИЕ: Собственная реализация хеш-функции
+        #region Utilities
+        private static (int, int) EdgeKey(int a, int b) => (math.min(a, b), math.max(a, b));
+
+        private static float4 BiomeColor(BiomeType type) => type switch
+        {
+            BiomeType.Ocean     => new float4(0.1f, 0.3f, 0.8f, 1),
+            BiomeType.Coast     => new float4(0.9f, 0.8f, 0.6f, 1),
+            BiomeType.Ice       => new float4(0.8f, 0.9f, 1.0f, 1),
+            BiomeType.Desert    => new float4(0.9f, 0.8f, 0.5f, 1),
+            BiomeType.Grassland => new float4(0.3f, 0.7f, 0.2f, 1),
+            BiomeType.Forest    => new float4(0.1f, 0.5f, 0.1f, 1),
+            BiomeType.Mountain  => new float4(0.5f, 0.4f, 0.3f, 1),
+            BiomeType.Snow      => new float4(0.95f, 0.95f, 0.95f, 1),
+            _                   => new float4(1, 1, 1, 1)
+        };
+
         private struct EdgeComparer : IEqualityComparer<(int, int)>
         {
             public bool Equals((int, int) x, (int, int) y) => x.Item1 == y.Item1 && x.Item2 == y.Item2;
-            
-            public int GetHashCode((int, int) obj)
-            {
-                unchecked
-                {
-                    int hash = 17;
-                    hash = hash * 23 + obj.Item1;
-                    hash = hash * 23 + obj.Item2;
-                    return hash;
-                }
-            }
+            public int GetHashCode((int, int) obj) => (obj.Item1 * 397) ^ obj.Item2;
         }
+        #endregion
     }
 }
