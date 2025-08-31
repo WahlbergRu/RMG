@@ -1,5 +1,5 @@
 # Unity DOTS + Voronoi + Delaunay realization in another branch 
-refactoring-v2
+[refactoring-v2](https://github.com/WahlbergRu/RMG/tree/refactoring-v2)
 
 # Random Map Generator (based on VoronoiMapGen)
 This is a Unity implementation of a map generator using a similar process to the
