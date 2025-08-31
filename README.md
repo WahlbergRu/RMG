@@ -1,4 +1,4 @@
-# Unity + DOTS + realization in another branch 
+# Unity DOTS + Voronoi + Delaunay realization in another branch 
 refactoring-v2
 
 # Random Map Generator (based on VoronoiMapGen)
