@@ -1,3 +1,6 @@
+# Unity + DOTS + realization in another branch 
+refactoring-v2
+
 # Random Map Generator (based on VoronoiMapGen)
 This is a Unity implementation of a map generator using a similar process to the
 one outlined by [Amit Patel at Red Blob Games](http://www-cs-students.stanford.edu/~amitp/game-programming/polygon-map-generation/)
