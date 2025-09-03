@@ -269,11 +269,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ee6f5765c0ed124283575f081ffa107, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Seed: 12345
+  Seed: 123456
   SiteCount: 100
-  MapSize: {x: 100, y: 100}
-  EdgeWidth: 0.1
-  RoadWidth: 0.8
+  MapSize: {x: 1000, y: 1000}
+  EdgeWidth: 0.5
+  RoadWidth: 0.3
   RoadColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   BorderColor: {r: 0, g: 0, b: 1, a: 1}
   DrawRoads: 1

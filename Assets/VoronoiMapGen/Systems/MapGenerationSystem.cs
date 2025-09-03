@@ -1,3 +1,5 @@
+using System;
+using System.Diagnostics;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -5,6 +7,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Jobs;
+using Debug = UnityEngine.Debug;
 
 namespace VoronoiMapGen.Systems
 {
@@ -12,6 +15,7 @@ namespace VoronoiMapGen.Systems
     public partial class MapGenerationSystem : SystemBase
     {
         private EntityQuery _generationQuery;
+
 
         protected override void OnCreate()
         {
@@ -21,9 +25,9 @@ namespace VoronoiMapGen.Systems
         protected override void OnUpdate()
         {
             var requests = _generationQuery.ToComponentDataArray<MapGenerationRequest>(Allocator.Temp);
-            
             if (requests.Length == 0)
             {
+                requests.Dispose();
                 return;
             }
 
@@ -39,23 +43,27 @@ namespace VoronoiMapGen.Systems
 
             Debug.Log($"Starting map generation with seed: {seed}");
 
-            // Создаем сущности для сайтов
+            // --- 1) Создаем сущности для сайтов ---
             var siteEntities = CollectionHelper.CreateNativeArray<Entity>(request.SiteCount, Allocator.Temp);
             for (int i = 0; i < request.SiteCount; i++)
             {
                 siteEntities[i] = EntityManager.CreateEntity();
-                EntityManager.AddComponent<Components.VoronoiSite>(siteEntities[i]);
+                EntityManager.AddComponent<VoronoiSite>(siteEntities[i]);
             }
 
-            // Генерируем сайты - используем TempJob для джобов
+            // --- 2) Генерируем сайты (Job) ---
             var sites = new NativeArray<float2>(request.SiteCount, Allocator.TempJob);
             var siteJob = new SiteGenerationJob
             {
-                Sites = sites,
-                Seed = seed, // Используем гарантированный ненулевой сид
+                Sites   = sites,
+                Seed    = seed,
                 MapSize = request.MapSize
             };
+
+            var swSites = Stopwatch.StartNew();
             siteJob.Schedule(request.SiteCount, 64).Complete();
+            swSites.Stop();
+            Debug.Log($"SiteGenerationJob completed in {swSites.ElapsedMilliseconds} ms");
 
             // Заполняем компоненты сайтов
             for (int i = 0; i < siteEntities.Length; i++)
@@ -63,82 +71,97 @@ namespace VoronoiMapGen.Systems
                 EntityManager.SetComponentData(siteEntities[i], new VoronoiSite
                 {
                     Position = sites[i],
-                    Index = i
+                    Index    = i
                 });
             }
 
-            // Триангуляция Делоне
-            var triangles = new NativeList<Components.DelaunayTriangle>(request.SiteCount * 2, Allocator.TempJob);
+            // --- 3) Триангуляция Делоне ---
+            var triangles = new NativeList<DelaunayTriangle>(request.SiteCount * 2, Allocator.TempJob);
             var triangulationJob = new DelaunayTriangulationJob
             {
-                Sites = sites,
+                Sites     = sites,
                 Triangles = triangles,
-                Edges = new NativeList<int3>(request.SiteCount * 3, Allocator.TempJob)
+                Edges     = new NativeList<int3>(request.SiteCount * 3, Allocator.TempJob)
             };
-            triangulationJob.Run();
 
+            var swTri = Stopwatch.StartNew();
+            triangulationJob.Run(); // синхронно, чтобы честно замерить
+            swTri.Stop();
+            Debug.Log($"DelaunayTriangulationJob completed in {swTri.ElapsedMilliseconds} ms");
             Debug.Log($"Generated {triangles.Length} triangles");
 
-            // Построение диаграммы Вороного
+            // --- 4) Построение диаграммы Вороного ---
             var edges = new NativeList<VoronoiEdge>(request.SiteCount * 3, Allocator.TempJob);
             var cells = new NativeList<VoronoiCell>(request.SiteCount, Allocator.TempJob);
-            
+
             var voronoiJob = new VoronoiConstructionJob
             {
                 Triangles = triangles.AsArray(),
-                Sites = sites,
-                Edges = edges,
-                Cells = cells
+                Sites     = sites,
+                Edges     = edges,
+                Cells     = cells
             };
-            voronoiJob.Run();
 
+            var swVor = Stopwatch.StartNew();
+            voronoiJob.Run();
+            swVor.Stop();
+            Debug.Log($"VoronoiConstructionJob completed in {swVor.ElapsedMilliseconds} ms");
             Debug.Log($"Generated {edges.Length} Voronoi edges");
 
-            // Создаем сущности для ячеек
+            // --- 5) Создаем сущности для ячеек, записываем данные + высоты ---
             var cellEntities = CollectionHelper.CreateNativeArray<Entity>(cells.Length, Allocator.Temp);
             for (int i = 0; i < cells.Length; i++)
             {
                 cellEntities[i] = EntityManager.CreateEntity();
-                EntityManager.AddComponent<Components.VoronoiCell>(cellEntities[i]);
+                EntityManager.AddComponent<VoronoiCell>(cellEntities[i]);
             }
 
+            var swCellHeights = Stopwatch.StartNew();
             for (int i = 0; i < cells.Length; i++)
             {
-                EntityManager.SetComponentData(cellEntities[i], cells[i]);
-            }
+                var cell = cells[i];
+                EntityManager.SetComponentData(cellEntities[i], cell);
 
-            // Создаем сущности для ребер
+                // // Высота по центроиду
+                // float height = SampleHeight(cell.Centroid, seed);
+                // EntityManager.AddComponentData(cellEntities[i], new CellHeight { Value = height });
+            }
+            swCellHeights.Stop();
+
+            // --- 6) Создаем сущности для рёбер, записываем данные + высоты ---
             var edgeEntities = CollectionHelper.CreateNativeArray<Entity>(edges.Length, Allocator.Temp);
+            var swEdgeHeights = Stopwatch.StartNew();
             for (int i = 0; i < edges.Length; i++)
             {
                 edgeEntities[i] = EntityManager.CreateEntity();
-                EntityManager.AddComponent<Components.VoronoiEdge>(edgeEntities[i]);
-            }
-
-            for (int i = 0; i < edges.Length; i++)
-            {
+                EntityManager.AddComponent<VoronoiEdge>(edgeEntities[i]);
                 EntityManager.SetComponentData(edgeEntities[i], edges[i]);
             }
+            swEdgeHeights.Stop();
 
-            // Генерация биомов - используем TempJob для джобов
+            // --- 7) Генерация биомов (Job) ---
             var biomes = new NativeArray<CellBiome>(request.SiteCount, Allocator.TempJob);
             var biomeJob = new BiomeAssignmentJob
             {
-                Cells = cells.AsArray(),
-                Sites = sites,
-                Biomes = biomes,
+                Cells     = cells.AsArray(),
+                Sites     = sites,
+                Biomes    = biomes,
                 MapCenter = request.MapSize * 0.5f,
                 MapRadius = math.length(request.MapSize) * 0.5f
             };
-            biomeJob.Schedule(request.SiteCount, 64).Complete();
 
-            // Добавляем компоненты биомов к ячейкам
+            var swBiome = Stopwatch.StartNew();
+            biomeJob.Schedule(request.SiteCount, 64).Complete();
+            swBiome.Stop();
+            Debug.Log($"BiomeAssignmentJob completed in {swBiome.ElapsedMilliseconds} ms");
+
+            // Проставляем биомы ячейкам
             for (int i = 0; i < cellEntities.Length && i < biomes.Length; i++)
             {
                 EntityManager.AddComponentData(cellEntities[i], biomes[i]);
             }
 
-            // Добавляем тег завершения
+            // --- 8) Пометка о завершении генерации ---
             var mapEntity = EntityManager.CreateEntity();
             EntityManager.AddComponentData(mapEntity, new MapGeneratedTag());
 
@@ -146,19 +169,19 @@ namespace VoronoiMapGen.Systems
             var requestEntity = _generationQuery.GetSingletonEntity();
             EntityManager.SetComponentData(requestEntity, new MapGenerationRequest
             {
-                Seed = seed, // Сохраняем гарантированный сид
-                SiteCount = request.SiteCount,
-                MapSize = request.MapSize,
+                Seed        = seed,
+                SiteCount   = request.SiteCount,
+                MapSize     = request.MapSize,
                 IsGenerated = true
             });
 
-            Debug.Log($"Map Statistics:");
+            // --- 9) Статистика и отчёт ---
+            Debug.Log("Map Statistics:");
             Debug.Log($"  Sites: {sites.Length}");
             Debug.Log($"  Triangles: {triangles.Length}");
             Debug.Log($"  Voronoi Edges: {edges.Length}");
             Debug.Log($"  Voronoi Cells: {cells.Length}");
 
-            // Создаем текстовый отчет (без NativeHashMap)
             string report = $"=== MAP GENERATION REPORT ===\n";
             report += $"Seed: {seed}\n";
             report += $"Sites: {sites.Length}\n";
@@ -166,32 +189,34 @@ namespace VoronoiMapGen.Systems
             report += $"Voronoi Edges: {edges.Length}\n";
             report += $"Voronoi Cells: {cells.Length}\n";
             report += $"Map Size: {request.MapSize.x} x {request.MapSize.y}\n";
+            report += $"Timings (ms): " +
+                      $"SiteGen={swSites.ElapsedMilliseconds}, " +
+                      $"Triangulation={swTri.ElapsedMilliseconds}, " +
+                      $"VoronoiBuild={swVor.ElapsedMilliseconds}, " +
+                      $"CellHeight={swCellHeights.ElapsedMilliseconds}, " +
+                      $"EdgeHeight={swEdgeHeights.ElapsedMilliseconds}, " +
+                      $"BiomeAssign={swBiome.ElapsedMilliseconds}\n";
 
-            // Простая статистика биомов через массивы
+            // Простая статистика биомов
             var biomeCounts = new NativeArray<int>((int)BiomeType.Snow + 1, Allocator.Temp);
             for (int i = 0; i < biomes.Length; i++)
             {
-                var biome = biomes[i];
-                int biomeIndex = (int)biome.Type;
-                if (biomeIndex >= 0 && biomeIndex < biomeCounts.Length)
-                {
+                int biomeIndex = (int)biomes[i].Type;
+                if ((uint)biomeIndex < (uint)biomeCounts.Length)
                     biomeCounts[biomeIndex] = biomeCounts[biomeIndex] + 1;
-                }
             }
 
             string[] biomeNames = { "Ocean", "Coast", "Ice", "Desert", "Grassland", "Forest", "Mountain", "Snow" };
             for (int i = 0; i < biomeCounts.Length && i < biomeNames.Length; i++)
             {
                 if (biomeCounts[i] > 0)
-                {
                     report += $"{biomeNames[i]}: {biomeCounts[i]}\n";
-                }
             }
             biomeCounts.Dispose();
 
             Debug.Log(report);
 
-            // Освобождаем ресурсы
+            // --- 10) Освобождаем ресурсы ---
             siteEntities.Dispose();
             sites.Dispose();
             triangles.Dispose();
@@ -203,5 +228,7 @@ namespace VoronoiMapGen.Systems
 
             Debug.Log("Map generation completed!");
         }
+
+        // ---- Helpers ----
     }
 }

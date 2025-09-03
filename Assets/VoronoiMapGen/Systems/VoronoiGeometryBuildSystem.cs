@@ -16,13 +16,19 @@ namespace VoronoiMapGen.Systems
     [UpdateInGroup(typeof(SimulationSystemGroup))]
     public partial struct VoronoiGeometryBuildSystem : ISystem
     {
+        
+        public void OnCreate(ref SystemState state)
+        {
+        }
+        
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             // Выполняется только один раз
-            if (!SystemAPI.HasSingleton<MapGeneratedTag>() || SystemAPI.HasSingleton<GeometryBuiltTag>())
+            if (!SystemAPI.HasSingleton<MapGeneratedTag>() || SystemAPI.HasSingleton<GeometryBuiltTag>()|| !SystemAPI.HasSingleton<MapGenerationRequest>())
                 return;
-
+            int seed = SystemAPI.GetSingleton<MapGenerationRequest>().Seed;
+            
             var edgeQuery = SystemAPI.QueryBuilder().WithAll<VoronoiEdge>().Build();
             using var edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
             if (edges.Length == 0) return;
@@ -37,7 +43,7 @@ namespace VoronoiMapGen.Systems
             {
                 var entity = cells[i];
                 var cell = state.EntityManager.GetComponentData<VoronoiCell>(entity);
-                ProcessCell(entity, cell, edges, ecb, ref state);
+                ProcessCell(entity, cell, edges, ecb, ref state, seed);
                 ecb.AddComponent<VoronoiMeshGeneratedTag>(entity);
             }
             
@@ -49,7 +55,7 @@ namespace VoronoiMapGen.Systems
             ecb.Dispose();
         }
 
-        private static void ProcessCell(Entity entity, VoronoiCell cell, NativeArray<VoronoiEdge> allEdges, EntityCommandBuffer ecb, ref SystemState state)
+        private static void ProcessCell(Entity entity, VoronoiCell cell, NativeArray<VoronoiEdge> allEdges, EntityCommandBuffer ecb, ref SystemState state, int seed)
         {
             if (!state.EntityManager.HasBuffer<CellPolygonVertex>(entity))
             {
@@ -97,7 +103,9 @@ namespace VoronoiMapGen.Systems
             // Записываем вершины
             for (int i = 0; i < verts.Length; i++)
             {
-                vertsBuf.Add(new CellPolygonVertex { Value = verts[i] });
+                vertsBuf.Add(new CellPolygonVertex { 
+                    Value = new float3(verts[i].x, SampleHeight(verts[i], seed), verts[i].y) 
+                });
             }
 
             // Fan triangulation: треугольники (0, i, i+1)
@@ -118,6 +126,20 @@ namespace VoronoiMapGen.Systems
             verts.Dispose();
         }
 
+        // Параметры шума для высоты — при желании можно перенести в MapGenerationRequest
+        private const float HeightFrequency  = 0.02f;  // масштаб (меньше — крупнее холмы)
+        private const float HeightAmplitude  = 106.0f;   // максимальная высота
+        private const float SeedOffsetScale  = 0.001f; // смещение семпла от сида
+
+        public static float SampleHeight(float2 worldPos, int seed)
+        {
+            // смещение сида легко меняет «карту»
+            float2 sample = worldPos * HeightFrequency + new float2(seed * SeedOffsetScale, seed * SeedOffsetScale);
+            float n = Unity.Mathematics.noise.snoise(sample);   // [-1, 1]
+            n = n * 0.5f + 0.5f;                                 // [0, 1]
+            return n * HeightAmplitude;                          // [0, HeightAmplitude]
+        }
+        
         // Хелперы
         private static ulong HashFloat2(float2 v)
         {

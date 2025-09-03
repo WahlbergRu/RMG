@@ -10,7 +10,7 @@ namespace VoronoiMapGen.Jobs
     [BurstCompile]
     public struct VoronoiConstructionJob : IJob
     {
-        [ReadOnly] public NativeArray<DelaunayTriangle> Triangles; // ✅ Исправлено: DelaunayTriangle вместо int3
+        [ReadOnly] public NativeArray<DelaunayTriangle> Triangles;
         [ReadOnly] public NativeArray<float2> Sites;
         public NativeList<VoronoiEdge> Edges;
         public NativeList<VoronoiCell> Cells;

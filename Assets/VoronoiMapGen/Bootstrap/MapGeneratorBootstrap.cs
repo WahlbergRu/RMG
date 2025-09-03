@@ -18,6 +18,8 @@ namespace VoronoiMapGen.Bootstrap
         public Color BorderColor = Color.blue;
         public bool DrawRoads = true;
         public bool DrawBorders = true;
+        public int LevelsCount; // Обычно 3-5
+        public float LevelScaleFactor; // Как уменьшать масштаб (напр. 0.3)
 
         void Start()
         {
@@ -36,7 +38,9 @@ namespace VoronoiMapGen.Bootstrap
                 Seed = Seed,
                 SiteCount = SiteCount,
                 MapSize = MapSize,
-                IsGenerated = false
+                IsGenerated = false,
+                LevelsCount = LevelsCount,
+                LevelScaleFactor = LevelScaleFactor
             });
 
             var settingsEntity = entityManager.CreateEntity();

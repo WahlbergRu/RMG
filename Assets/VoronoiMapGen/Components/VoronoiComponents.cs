@@ -42,12 +42,10 @@ namespace VoronoiMapGen.Components
         public Entity NeighborTriangle;
         public int SharedEdge;
     }
-
-    // Тег, чтобы отслеживать, что мешы сгенерированы
-    public struct VoronoiMeshGeneratedTag : IComponentData
-    {
-    }
     
+    
+
+    public struct VoronoiMeshGeneratedTag : IComponentData { }
     public struct RoadEntityTag : IComponentData { }
     public struct BorderEntityTag : IComponentData { }
     
@@ -61,4 +59,26 @@ namespace VoronoiMapGen.Components
         public bool DrawBorders;
         public Vector2 MapSize;
     }
+    
+    // Уровни детализации
+    public enum DetailLevel : byte
+    {
+        Global = 0,     // L0: Континенты
+        Regional = 1,   // L1: Биомы/реки
+        Settlement = 2, // L2: Города
+        Urban = 3,      // L3: Районы/метро
+        Object = 4      // L4: Здания/объекты
+    }
+
+    // Компонент для связи уровней
+    public struct DetailLevelData : IComponentData
+    {
+        public DetailLevel Level;
+        public int ParentIndex; // Индекс родительской ячейки
+        public int ChildCount;  // Количество дочерних ячеек
+        public float InfluenceRadius; // Радиус влияния (для L2)
+    }
+    
+    
+    
 }

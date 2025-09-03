@@ -9,6 +9,8 @@ namespace VoronoiMapGen.Components
         public int SiteCount;
         public float2 MapSize;
         public bool IsGenerated;
+        public int LevelsCount; 
+        public float LevelScaleFactor; 
     }
 
     public struct CellBiome : IComponentData
@@ -46,4 +48,29 @@ namespace VoronoiMapGen.Components
     }
 
     public struct MapGeneratedTag : IComponentData { }
+     
+    
+    /// <summary>
+    /// Высота ячейки (по центроиду)
+    /// </summary>
+    public struct CellHeight : IComponentData
+    {
+        public float Value;
+    }
+
+    /// <summary>
+    /// Высота ребра (по середине сегмента)
+    /// </summary>
+    public struct EdgeHeight : IComponentData
+    {
+        public float Value;
+    }
+
+    /// <summary>
+    /// Высота вершины полигона (может использоваться для true 3D-ландшафта)
+    /// </summary>
+    public struct VertexHeight : IBufferElementData
+    {
+        public float Value;
+    }
 }

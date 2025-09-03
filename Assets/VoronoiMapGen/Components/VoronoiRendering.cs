@@ -13,7 +13,7 @@ namespace VoronoiMapGen.Components
     [InternalBufferCapacity(6)]
     public struct CellPolygonVertex : IBufferElementData
     {
-        public float2 Value;
+        public float3 Value;
     }
 
     /// <summary> Триангуляция фаном: пары (i, i+1), нулевой индекс вставляется при записи. </summary>

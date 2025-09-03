@@ -61,10 +61,12 @@ namespace VoronoiMapGen.Rendering
             };
 
             var vArray = new Vector3[verts.Length];
+
             for (int i = 0; i < verts.Length; i++)
             {
-                float2 v = verts[i].Value;
-                vArray[i] = new Vector3(v.x - c.x, 0f, v.y - c.y);
+                float3 v = verts[i].Value; 
+
+                vArray[i] = new Vector3(v.x - c.x, v.y, v.z - c.y);
             }
 
             var tArray = new int[tris.Length];
@@ -83,10 +85,14 @@ namespace VoronoiMapGen.Rendering
         {
             if (!em.Exists(entity)) return;
 
+            float height = em.HasComponent<CellHeight>(entity) 
+                ? em.GetComponentData<CellHeight>(entity).Value 
+                : 0f;
+
             float3 pos = em.HasComponent<CellLocalPosition>(entity)
                 ? em.GetComponentData<CellLocalPosition>(entity).Value
-                : new float3(em.GetComponentData<VoronoiCell>(entity).Centroid.x, 0f,
-                             em.GetComponentData<VoronoiCell>(entity).Centroid.y);
+                : new float3(em.GetComponentData<VoronoiCell>(entity).Centroid.x, height,
+                    em.GetComponentData<VoronoiCell>(entity).Centroid.y);
 
             RenderMeshUtility.AddComponents(entity, em, desc, renderMeshArray,
                 MaterialMeshInfo.FromRenderMeshArrayIndices(0, meshIndex));
