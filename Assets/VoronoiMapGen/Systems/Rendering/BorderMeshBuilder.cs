@@ -9,7 +9,7 @@ namespace VoronoiMapGen.Rendering
 {
     public static class BorderMeshBuilder
     {
-        public static void Build(EntityManager em, Material material, MapRenderingSettings settings)
+        public static void Build(EntityManager em, Material material, MapSettings settings)
         {
             if (!settings.DrawBorders) return;
 

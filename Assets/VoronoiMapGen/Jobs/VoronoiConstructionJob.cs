@@ -12,96 +12,125 @@ namespace VoronoiMapGen.Jobs
     {
         [ReadOnly] public NativeArray<DelaunayTriangle> Triangles;
         [ReadOnly] public NativeArray<float2> Sites;
+        [ReadOnly] public NativeArray<VoronoiSite> SiteMetadata;
+        [ReadOnly] public int Level;
+        
         public NativeList<VoronoiEdge> Edges;
         public NativeList<VoronoiCell> Cells;
 
         public void Execute()
         {
-            // Создаем ячейки для каждого сайта
+            // Создаём ячейки текущего уровня
             for (int i = 0; i < Sites.Length; i++)
             {
+                if (SiteMetadata[i].Level != Level) continue;
+                
                 Cells.Add(new VoronoiCell
                 {
                     SiteIndex = i,
                     Centroid = Sites[i],
-                    RegionIndex = i
+                    RegionIndex = i,
+                    Level = Level,
+                    ParentRegionIndex = SiteMetadata[i].ParentIndex
                 });
             }
 
-            // Обрабатываем треугольники и строим рёбра Вороной
+            var edgeToTriangle = new NativeHashMap<int2, int>(Triangles.Length * 3, Allocator.Temp);
+            var createdEdges = new NativeHashSet<int2>(Triangles.Length * 3, Allocator.Temp);
+            
+            // Строим рёбра
             for (int i = 0; i < Triangles.Length; i++)
             {
-                for (int j = i + 1; j < Triangles.Length; j++)
-                {
-                    var tri1 = Triangles[i];
-                    var tri2 = Triangles[j];
+                var triangle = Triangles[i];
+                
+                if (SiteMetadata[triangle.A].Level != Level ||
+                    SiteMetadata[triangle.B].Level != Level ||
+                    SiteMetadata[triangle.C].Level != Level)
+                    continue;
+                    
+                ProcessTriangleEdges(i, triangle, edgeToTriangle, createdEdges);
+            }
+            
+            // Обработка граничных рёбер
+            ProcessBoundaryEdges(edgeToTriangle, createdEdges);
+            
+            edgeToTriangle.Dispose();
+            createdEdges.Dispose();
+        }
+        
+        private void ProcessTriangleEdges(int triangleIndex, DelaunayTriangle triangle,
+            NativeHashMap<int2, int> edgeToTriangle,
+            NativeHashSet<int2> createdEdges)
+        {
+            AddEdgeIfValid(triangleIndex, triangle.A, triangle.B, triangle.CircumCenter, edgeToTriangle, createdEdges);
+            AddEdgeIfValid(triangleIndex, triangle.B, triangle.C, triangle.CircumCenter, edgeToTriangle, createdEdges);
+            AddEdgeIfValid(triangleIndex, triangle.C, triangle.A, triangle.CircumCenter, edgeToTriangle, createdEdges);
+        }
+        
+        private void AddEdgeIfValid(int triangleIndex, int a, int b, float2 circumCenter,
+            NativeHashMap<int2, int> edgeToTriangle,
+            NativeHashSet<int2> createdEdges)
+        {
+            int2 normalizedEdge = new int2(math.min(a, b), math.max(a, b));
+            
+            if (SiteMetadata[a].Level != Level || SiteMetadata[b].Level != Level)
+                return;
+                
+            if (edgeToTriangle.TryGetValue(normalizedEdge, out int existingTriangleIndex))
+            {
+                var existingTriangle = Triangles[existingTriangleIndex];
 
-                    // Проверяем, являются ли треугольники соседними
-                    if (ShareEdge(tri1, tri2, out int siteA, out int siteB))
+                if (createdEdges.Add(normalizedEdge))
+                {
+                    Edges.Add(new VoronoiEdge
                     {
-                        if (siteA != -1 && siteB != -1)
-                        {
-                            Edges.Add(new VoronoiEdge
-                            {
-                                SiteA = siteA,
-                                SiteB = siteB,
-                                VertexA = tri1.CircumCenter,
-                                VertexB = tri2.CircumCenter,
-                                CellA = Entity.Null,
-                                CellB = Entity.Null
-                            });
-                        }
-                    }
+                        SiteA = normalizedEdge.x,
+                        SiteB = normalizedEdge.y,
+                        VertexA = existingTriangle.CircumCenter,
+                        VertexB = circumCenter,
+                        CellA = Entity.Null,
+                        CellB = Entity.Null,
+                        Level = Level
+                    });
+                }
+                
+                edgeToTriangle.Remove(normalizedEdge);
+            }
+            else
+            {
+                edgeToTriangle.Add(normalizedEdge, triangleIndex);
+            }
+        }
+        
+        private void ProcessBoundaryEdges(NativeHashMap<int2, int> edgeToTriangle,
+            NativeHashSet<int2> createdEdges)
+        {
+            foreach (var kvp in edgeToTriangle)
+            {
+                int2 edge = new int2(math.min(kvp.Key.x, kvp.Key.y), math.max(kvp.Key.x, kvp.Key.y));
+                var triangle = Triangles[kvp.Value];
+
+                if (createdEdges.Add(edge))
+                {
+                    Edges.Add(new VoronoiEdge
+                    {
+                        SiteA = edge.x,
+                        SiteB = edge.y,
+                        VertexA = triangle.CircumCenter,
+                        VertexB = ExtendBoundaryEdge(triangle.CircumCenter, Sites[edge.x], Sites[edge.y]),
+                        CellA = Entity.Null,
+                        CellB = Entity.Null,
+                        Level = Level
+                    });
                 }
             }
         }
-
-        private bool ShareEdge(DelaunayTriangle a, DelaunayTriangle b, out int siteA, out int siteB)
+        
+        private float2 ExtendBoundaryEdge(float2 circumCenter, float2 siteA, float2 siteB)
         {
-            siteA = -1;
-            siteB = -1;
-            int sharedCount = 0;
-
-            // Сравниваем все вершины напрямую (без managed arrays)
-            // Вершины треугольника a
-            int vertA1 = a.A;
-            int vertA2 = a.B;
-            int vertA3 = a.C;
-            
-            // Вершины треугольника b
-            int vertB1 = b.A;
-            int vertB2 = b.B;
-            int vertB3 = b.C;
-
-            // Проверяем все комбинации
-            if (vertA1 == vertB1 || vertA1 == vertB2 || vertA1 == vertB3)
-            {
-                if (sharedCount == 0)
-                    siteA = vertA1;
-                else if (sharedCount == 1)
-                    siteB = vertA1;
-                sharedCount++;
-            }
-
-            if (vertA2 == vertB1 || vertA2 == vertB2 || vertA2 == vertB3)
-            {
-                if (sharedCount == 0)
-                    siteA = vertA2;
-                else if (sharedCount == 1)
-                    siteB = vertA2;
-                sharedCount++;
-            }
-
-            if (vertA3 == vertB1 || vertA3 == vertB2 || vertA3 == vertB3)
-            {
-                if (sharedCount == 0)
-                    siteA = vertA3;
-                else if (sharedCount == 1)
-                    siteB = vertA3;
-                sharedCount++;
-            }
-
-            return sharedCount >= 2;
+            float2 edgeDir = math.normalize(siteB - siteA);
+            float2 perpDir = new float2(-edgeDir.y, edgeDir.x);
+            return circumCenter + perpDir * 1000f;
         }
     }
 }

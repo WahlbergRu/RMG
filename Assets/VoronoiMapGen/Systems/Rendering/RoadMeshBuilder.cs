@@ -11,7 +11,7 @@ namespace VoronoiMapGen.Rendering
 {
     public static class RoadMeshBuilder
     {
-        public static void Build(EntityManager em, Material material, MapRenderingSettings settings)
+        public static void Build(EntityManager em, Material material, MapSettings settings)
         {
             if (!settings.DrawRoads) return;
 
