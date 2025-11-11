@@ -13,7 +13,6 @@ namespace VoronoiMapGen.Systems
 
             for (int level = 0; level < levels.Length; level++)
             {
-                
                 // Сайты текущего уровня
                 int sites = CountEntitiesWithLevel<VoronoiSite>(em, level);
                 // Ячейки текущего уровня
@@ -24,27 +23,25 @@ namespace VoronoiMapGen.Systems
                 Debug.Log($"Level {level}: {sites} sites, {cells} cells, {edges} edges");
             }
         }
-        
-        
 
         private static int CountEntitiesWithLevel<T>(EntityManager em, int level) where T : unmanaged, IComponentData
         {
             // Создаём запрос с фильтром по DetailLevelData
-            var query = em.CreateEntityQuery(
+            EntityQuery query = em.CreateEntityQuery(
                 ComponentType.ReadOnly<T>(),
                 ComponentType.ReadOnly<DetailLevelData>()
             );
                 
             // Собираем все сущности с нужным уровнем
             int count = 0;
-            using (var entities = query.ToEntityArray(Allocator.Temp))
+            using (NativeArray<Entity> entities = query.ToEntityArray(Allocator.TempJob))
             {
                 for (int i = 0; i < entities.Length; i++)
                 {
-                    var entity = entities[i];
+                    Entity entity = entities[i];
                     if (em.HasComponent<DetailLevelData>(entity))
                     {
-                        var levelData = em.GetComponentData<DetailLevelData>(entity);
+                        DetailLevelData levelData = em.GetComponentData<DetailLevelData>(entity);
                         if (levelData.Level == (DetailLevel)level)
                             count++;
                     }

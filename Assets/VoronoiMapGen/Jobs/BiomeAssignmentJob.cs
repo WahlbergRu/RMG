@@ -16,14 +16,14 @@ public struct BiomeAssignmentJob : IJobParallelFor
         if (index >= Sites.Length || index >= Biomes.Length)
             return;
 
-        var site = Sites[index];
-        var distanceToCenter = math.distance(site, MapCenter);
-        var normalizedDistance = distanceToCenter / (MapRadius > 0 ? MapRadius : 1.0f);
+        float2 site = Sites[index];
+        float distanceToCenter = math.distance(site, MapCenter);
+        float normalizedDistance = distanceToCenter / (MapRadius > 0 ? MapRadius : 1.0f);
 
         // Простая генерация биомов на основе расстояния от центра
         uint randomSeed = (uint)(index * 137 + 1);
         if (randomSeed == 0) randomSeed = 1;
-        var random = new Unity.Mathematics.Random(randomSeed);
+        Random random = new Unity.Mathematics.Random(randomSeed);
         
         // ИСПРАВЛЕНО: добавлено ограничение на elevation
         float elevation = math.saturate(1.0f - normalizedDistance + random.NextFloat(-0.2f, 0.2f));

@@ -20,10 +20,10 @@ namespace VoronoiMapGen.Systems
             in NativeArray<VoronoiSite> siteMetadata,
             int level)
         {
-            var triangles = new NativeList<DelaunayTriangle>(math.max(4, sites.Length * 2), Allocator.TempJob);
-            var edges = new NativeList<int3>(math.max(4, sites.Length * 3), Allocator.TempJob);
+            NativeList<DelaunayTriangle> triangles = new NativeList<DelaunayTriangle>(math.max(4, sites.Length * 2), Allocator.TempJob);
+            NativeList<int3> edges = new NativeList<int3>(math.max(4, sites.Length * 3), Allocator.TempJob);
 
-            var job = new DelaunayTriangulationJob
+            DelaunayTriangulationJob job = new DelaunayTriangulationJob
             {
                 Sites = sites,
                 SiteMetadata = siteMetadata,
@@ -32,7 +32,7 @@ namespace VoronoiMapGen.Systems
                 Edges = edges
             };
 
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             // DelaunayTriangulationJob реализован как IJob — выполняем синхронно
             job.Run();
             sw.Stop();

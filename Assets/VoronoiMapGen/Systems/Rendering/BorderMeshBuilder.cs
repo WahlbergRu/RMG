@@ -13,14 +13,14 @@ namespace VoronoiMapGen.Rendering
         {
             if (!settings.DrawBorders) return;
 
-            var edgeQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
-            using var edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
+            EntityQuery edgeQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
+            using NativeArray<VoronoiEdge> edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
 
-            var processed = new HashSet<(int, int)>(new EdgeComparer());
+            HashSet<(int, int)> processed = new HashSet<(int, int)>(new EdgeComparer());
 
-            foreach (var edge in edges)
+            foreach (VoronoiEdge edge in edges)
             {
-                var key = MeshUtils.EdgeKey(edge.SiteA, edge.SiteB);
+                (int, int) key = MeshUtils.EdgeKey(edge.SiteA, edge.SiteB);
                 if (!processed.Add(key)) continue;
 
                 float2 vA = edge.VertexA;
@@ -28,7 +28,7 @@ namespace VoronoiMapGen.Rendering
 
                 float3 center = new float3((vA.x + vB.x) * 0.5f, 0f, (vA.y + vB.y) * 0.5f);
 
-                var mesh = MeshUtils.CreateQuadMeshLocal(vA, vB, center, settings.EdgeWidth, "BorderSegment");
+                Mesh mesh = MeshUtils.CreateQuadMeshLocal(vA, vB, center, settings.EdgeWidth, "BorderSegment");
                 if (material != null) material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry + 10;
 
                 MeshUtils.CreateSegmentEntity(em, mesh, material, typeof(BorderEntityTag), center);

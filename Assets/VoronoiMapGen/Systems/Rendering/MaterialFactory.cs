@@ -6,14 +6,14 @@ namespace VoronoiMapGen.Rendering
     {
         public static Material Create(string shaderName, string name, bool instancing, Color? color = null)
         {
-            var shader = Shader.Find(shaderName);
+            Shader shader = Shader.Find(shaderName);
             if (shader == null)
             {
                 Debug.LogError($"Shader '{shaderName}' not found! Ensure URP is installed.");
                 return null;
             }
 
-            var mat = new Material(shader)
+            Material mat = new Material(shader)
             {
                 name = name,
                 enableInstancing = instancing

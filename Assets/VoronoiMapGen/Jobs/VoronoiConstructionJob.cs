@@ -1,5 +1,6 @@
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -14,17 +15,17 @@ namespace VoronoiMapGen.Jobs
         [ReadOnly] public NativeArray<float2> Sites;
         [ReadOnly] public NativeArray<VoronoiSite> SiteMetadata;
         [ReadOnly] public int Level;
-        
+
         public NativeList<VoronoiEdge> Edges;
         public NativeList<VoronoiCell> Cells;
 
         public void Execute()
         {
-            // Создаём ячейки текущего уровня
+            // === 1. Создаём ячейки текущего уровня ===
             for (int i = 0; i < Sites.Length; i++)
             {
                 if (SiteMetadata[i].Level != Level) continue;
-                
+
                 Cells.Add(new VoronoiCell
                 {
                     SiteIndex = i,
@@ -35,97 +36,98 @@ namespace VoronoiMapGen.Jobs
                 });
             }
 
-            var edgeToTriangle = new NativeHashMap<int2, int>(Triangles.Length * 3, Allocator.Temp);
-            var createdEdges = new NativeHashSet<int2>(Triangles.Length * 3, Allocator.Temp);
-            
-            // Строим рёбра
+            // === 2. Предварительно выделяем буфер для рёбер ===
+            int estimatedEdgeCount = Triangles.Length * 3 / 2; // грубая оценка
+            Edges.Capacity = math.max(Edges.Capacity, estimatedEdgeCount);
+
+            // === 3. Строим рёбра ===
+            NativeParallelMultiHashMap<int2, int> edgeToTriangleIndices = new NativeParallelMultiHashMap<int2, int>(estimatedEdgeCount, Allocator.Temp);
+
             for (int i = 0; i < Triangles.Length; i++)
             {
-                var triangle = Triangles[i];
-                
+                DelaunayTriangle triangle = Triangles[i];
+
                 if (SiteMetadata[triangle.A].Level != Level ||
                     SiteMetadata[triangle.B].Level != Level ||
                     SiteMetadata[triangle.C].Level != Level)
                     continue;
-                    
-                ProcessTriangleEdges(i, triangle, edgeToTriangle, createdEdges);
+
+                ProcessTriangleEdges(i, triangle, edgeToTriangleIndices);
             }
-            
-            // Обработка граничных рёбер
-            ProcessBoundaryEdges(edgeToTriangle, createdEdges);
-            
-            edgeToTriangle.Dispose();
-            createdEdges.Dispose();
+
+            // === 4. Обрабатываем рёбра: внутренние и граничные ===
+            NativeHashSet<int2> processedEdges = new NativeHashSet<int2>(estimatedEdgeCount, Allocator.Temp);
+
+            foreach (KeyValue<int2, int> kvp in edgeToTriangleIndices)
+            {
+                int2 edge = kvp.Key;
+                int triangleIndex = kvp.Value;
+
+                if (processedEdges.Contains(edge)) continue;
+
+                // Проверяем, есть ли вторая сторона ребра (внутреннее ребро)
+                if (edgeToTriangleIndices.TryGetFirstValue(edge, out int firstTri, out NativeParallelMultiHashMapIterator<int2> it))
+                {
+                    bool foundSecond = edgeToTriangleIndices.TryGetNextValue(out int secondTri, ref it);
+
+                    if (foundSecond)
+                    {
+                        // Внутреннее ребро: между двумя треугольниками
+                        DelaunayTriangle tri1 = Triangles[firstTri];
+                        DelaunayTriangle tri2 = Triangles[secondTri];
+
+                        Edges.Add(new VoronoiEdge
+                        {
+                            SiteA = edge.x,
+                            SiteB = edge.y,
+                            VertexA = tri1.CircumCenter,
+                            VertexB = tri2.CircumCenter,
+                            CellA = Entity.Null,
+                            CellB = Entity.Null,
+                            Level = Level
+                        });
+                    }
+                    else
+                    {
+                        // Граничное ребро: только один треугольник
+                        DelaunayTriangle tri = Triangles[firstTri];
+
+                        Edges.Add(new VoronoiEdge
+                        {
+                            SiteA = edge.x,
+                            SiteB = edge.y,
+                            VertexA = tri.CircumCenter,
+                            VertexB = ExtendBoundaryEdge(tri.CircumCenter, Sites[edge.x], Sites[edge.y]),
+                            CellA = Entity.Null,
+                            CellB = Entity.Null,
+                            Level = Level
+                        });
+                    }
+                }
+
+                processedEdges.Add(edge);
+            }
+
+            processedEdges.Dispose();
+            edgeToTriangleIndices.Dispose();
         }
-        
+
         private void ProcessTriangleEdges(int triangleIndex, DelaunayTriangle triangle,
-            NativeHashMap<int2, int> edgeToTriangle,
-            NativeHashSet<int2> createdEdges)
+            NativeParallelMultiHashMap<int2, int> edgeToTriangleIndices)
         {
-            AddEdgeIfValid(triangleIndex, triangle.A, triangle.B, triangle.CircumCenter, edgeToTriangle, createdEdges);
-            AddEdgeIfValid(triangleIndex, triangle.B, triangle.C, triangle.CircumCenter, edgeToTriangle, createdEdges);
-            AddEdgeIfValid(triangleIndex, triangle.C, triangle.A, triangle.CircumCenter, edgeToTriangle, createdEdges);
-        }
-        
-        private void AddEdgeIfValid(int triangleIndex, int a, int b, float2 circumCenter,
-            NativeHashMap<int2, int> edgeToTriangle,
-            NativeHashSet<int2> createdEdges)
-        {
-            int2 normalizedEdge = new int2(math.min(a, b), math.max(a, b));
-            
-            if (SiteMetadata[a].Level != Level || SiteMetadata[b].Level != Level)
-                return;
-                
-            if (edgeToTriangle.TryGetValue(normalizedEdge, out int existingTriangleIndex))
-            {
-                var existingTriangle = Triangles[existingTriangleIndex];
+            // Ребро AB
+            int2 edgeAB = new int2(math.min(triangle.A, triangle.B), math.max(triangle.A, triangle.B));
+            edgeToTriangleIndices.Add(edgeAB, triangleIndex);
 
-                if (createdEdges.Add(normalizedEdge))
-                {
-                    Edges.Add(new VoronoiEdge
-                    {
-                        SiteA = normalizedEdge.x,
-                        SiteB = normalizedEdge.y,
-                        VertexA = existingTriangle.CircumCenter,
-                        VertexB = circumCenter,
-                        CellA = Entity.Null,
-                        CellB = Entity.Null,
-                        Level = Level
-                    });
-                }
-                
-                edgeToTriangle.Remove(normalizedEdge);
-            }
-            else
-            {
-                edgeToTriangle.Add(normalizedEdge, triangleIndex);
-            }
-        }
-        
-        private void ProcessBoundaryEdges(NativeHashMap<int2, int> edgeToTriangle,
-            NativeHashSet<int2> createdEdges)
-        {
-            foreach (var kvp in edgeToTriangle)
-            {
-                int2 edge = new int2(math.min(kvp.Key.x, kvp.Key.y), math.max(kvp.Key.x, kvp.Key.y));
-                var triangle = Triangles[kvp.Value];
+            // Ребро BC
+            int2 edgeBC = new int2(math.min(triangle.B, triangle.C), math.max(triangle.B, triangle.C));
+            edgeToTriangleIndices.Add(edgeBC, triangleIndex);
 
-                if (createdEdges.Add(edge))
-                {
-                    Edges.Add(new VoronoiEdge
-                    {
-                        SiteA = edge.x,
-                        SiteB = edge.y,
-                        VertexA = triangle.CircumCenter,
-                        VertexB = ExtendBoundaryEdge(triangle.CircumCenter, Sites[edge.x], Sites[edge.y]),
-                        CellA = Entity.Null,
-                        CellB = Entity.Null,
-                        Level = Level
-                    });
-                }
-            }
+            // Ребро CA
+            int2 edgeCA = new int2(math.min(triangle.C, triangle.A), math.max(triangle.C, triangle.A));
+            edgeToTriangleIndices.Add(edgeCA, triangleIndex);
         }
-        
+
         private float2 ExtendBoundaryEdge(float2 circumCenter, float2 siteA, float2 siteB)
         {
             float2 edgeDir = math.normalize(siteB - siteA);

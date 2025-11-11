@@ -1,4 +1,5 @@
-﻿using Unity.Entities;
+﻿using Unity.Collections;
+using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -122,6 +123,7 @@ namespace VoronoiMapGen.Components
     /// Перечисление уровней детализации в системе.
     /// Определяет 7 уровней от самых крупных (L0) до самых мелких (L6).
     /// </summary>
+    /// 
     public enum DetailLevel : byte
     {
         Global = 0,        // L0: Континенты, тектоника плит (самые крупные структуры)
@@ -252,6 +254,11 @@ namespace VoronoiMapGen.Components
         /// Например, для ячейки L3 (район) это индекс ячейки L2 (город).
         /// </summary>
         public int ParentRegionIndex;
+        
+        /// <summary>
+        /// Ценность.
+        /// </summary>
+        public float Value;
     }
 
     /// <summary>
@@ -421,4 +428,48 @@ namespace VoronoiMapGen.Components
     /// Добавляется к ребрам Вороной, которые представляют границы биомов.
     /// </summary>
     public struct BorderEntityTag : IComponentData { }
+    
+    // Параметры рельефа
+    public struct TerrainData : IComponentData
+    {
+        public float Elevation;      // Высота
+        public float Slope;          // Уклон
+        public float Roughness;      // Неровность
+        public float ElevationVariation; // Локальные перепады
+    }
+    
+    
+    // Данные о тектонике (L0)
+    public struct TectonicData : IComponentData
+    {
+        public float CollisionIntensity; // Интенсивность столкновения
+        public float2 PlateVelocity;     // Скорость движения плиты
+        public bool IsOcean;             // Это океан?
+    }
+
+    // Параметры релаксации
+    public struct RelaxationData : IComponentData
+    {
+        public float EdgeInfluence;      // Влияние рёбер
+        public float CenterRelaxation;   // Релаксация к центру
+        public float DistanceToEdge;     // Расстояние до ближайшего ребра
+    }
+
+    // Финальная высота (L4)
+    public struct FinalHeightData : IComponentData
+    {
+        public float FinalElevation;     // Финальная высота
+        public bool IsUrban;             // Это городская зона?
+        public float HeightVariation;    // Колебания высоты
+    }
+    
+    
+    public struct MapGenerationProgress : IComponentData
+    {
+        public float CurrentProgress; // от 0.0 до 1.0
+        public int CurrentLevel;
+        public int TotalLevels;
+        public bool IsGenerating;
+        public FixedString64Bytes StatusMessage;
+    }
 }

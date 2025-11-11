@@ -25,17 +25,17 @@ namespace VoronoiMapGen.Bootstrap
 
         void Start()
         {
-            var world = World.DefaultGameObjectInjectionWorld;
+            World world = World.DefaultGameObjectInjectionWorld;
             if (world == null)
             {
                 Debug.LogError("World is null!");
                 return;
             }
             
-            var entityManager = world.EntityManager;
+            EntityManager entityManager = world.EntityManager;
             
             // Создаем основные настройки
-            var settingsEntity = entityManager.CreateEntity();
+            Entity settingsEntity = entityManager.CreateEntity();
             entityManager.AddComponentData(settingsEntity, new MapSettings
             {
                 Seed = Seed,
@@ -51,7 +51,7 @@ namespace VoronoiMapGen.Bootstrap
             });
             
             // Добавляем настройки уровней (7 по умолчанию)
-            var levelSettings = entityManager.AddBuffer<LevelSettings>(settingsEntity);
+            DynamicBuffer<LevelSettings> levelSettings = entityManager.AddBuffer<LevelSettings>(settingsEntity);
             ConfigureDefaultLevelSettings(levelSettings);
         }
         

@@ -2,8 +2,10 @@
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Utils;
+using Random = Unity.Mathematics.Random;
 
 namespace VoronoiMapGen.Jobs
 {
@@ -15,30 +17,39 @@ namespace VoronoiMapGen.Jobs
         [ReadOnly] public int BaseSeed;
         [ReadOnly] public int ParentLevel;
         [ReadOnly] public NativeArray<VoronoiCell> ParentCells;
-    
+        
         public NativeArray<float2> Sites;
         public NativeArray<VoronoiSite> SiteMetadata;
-    
+        
         public void Execute()
         {
             int level = ParentLevel + 1;
             var settings = LevelSettings[level];
-        
-            // Для L0 генерируем глобально
+    
+            // +++ КРИТИЧЕСКИ ВАЖНО: КОРРЕКТНАЯ ПРОВЕРКА УРОВНЕЙ +++
             if (ParentLevel == -1)
             {
+                // L0: всегда глобальная генерация
                 GenerateGlobalSites(level, settings);
-                return;
             }
-        
-            // Для L1+ генерируем внутри ячеек предыдущего уровня
-            if (!ParentCells.IsCreated || ParentCells.Length == 0)
+            else
             {
-                GenerateGlobalSites(level, settings);
-                return;
+                // L1+: ВСЕГДА пытаемся генерировать внутри ячеек
+                // Даже если ParentCells пустой - это ошибка, которую нужно обработать
+                if (ParentCells.IsCreated && ParentCells.Length > 0)
+                {
+                    GenerateChildSites(level, settings);
+                }
+                else
+                {
+                    // +++ ОШИБКА: НЕТ РОДИТЕЛЬСКИХ ЯЧЕЕК ДЛЯ L1+ +++
+                    // Но все равно генерируем с ParentIndex = -1 для отладки
+                    // GenerateGlobalSites(level, settings);
+                
+                    Debug.Log("Error");
+                    // В продакшене: логировать ошибку или использовать резервную логику
+                }
             }
-        
-            GenerateChildSites(level, settings);
         }
     
         private void GenerateGlobalSites(int level, LevelSettings settings)
@@ -47,24 +58,24 @@ namespace VoronoiMapGen.Jobs
             {
                 uint randomSeed = (uint)(BaseSeed + i * 397);
                 if (randomSeed == 0) randomSeed = 1;
-                var random = new Unity.Mathematics.Random(randomSeed);
+                Random random = new Unity.Mathematics.Random(randomSeed);
             
                 float2 position = new float2(
                     random.NextFloat(0, MapSize.x),
                     random.NextFloat(0, MapSize.y)
                 );
             
-                // Рассчитываем "ценность точки"
-                float value = settings.ValueBias + 
-                              SimplexNoise(position * 0.001f, BaseSeed) * settings.ValueScale;
+                float value = level == 0 
+                    ? CalculateBaseValue(position, settings) 
+                    : settings.ValueBias + SimplexNoise(position * 0.001f, BaseSeed) * settings.ValueScale;
             
                 Sites[i] = position;
                 SiteMetadata[i] = new VoronoiSite
                 {
                     Position = position,
                     Index = i,
-                    Level = level, // ИСПРАВЛЕНО: уровень как индекс
-                    ParentIndex = -1,
+                    Level = level,
+                    ParentIndex = -1, // +++ КОРРЕКТНО ДЛЯ L0 +++
                     Value = math.saturate(value)
                 };
             }
@@ -76,24 +87,21 @@ namespace VoronoiMapGen.Jobs
             
             for (int parentIndex = 0; parentIndex < ParentCells.Length; parentIndex++)
             {
-                var parentCell = ParentCells[parentIndex];
-                // ИЗМЕНЕНО: Используем Level поле из VoronoiCell
+                VoronoiCell parentCell = ParentCells[parentIndex];
+                // +++ ИСПРАВЛЕНИЕ: ПРОВЕРКА УРОВНЯ РОДИТЕЛЬСКОЙ ЯЧЕЙКИ +++
                 if (parentCell.Level != ParentLevel) continue;
                 
-                // Количество точек для этой ячейки
+                // +++ УЛУЧШЕННЫЙ РАСЧЕТ КОЛИЧЕСТВА ТОЧЕК +++
                 int cellSiteCount = CalculateCellSiteCount(parentCell, settings);
                 
-                // Генерируем точки внутри ячейки
-                for (int i = 0; i < cellSiteCount; i++)
+                for (int i = 0; i < cellSiteCount && sitesGenerated < Sites.Length; i++)
                 {
-                    if (sitesGenerated >= Sites.Length) break;
-                    
                     float2 position = GeneratePointInCell(parentCell, parentIndex, i, settings);
                     
-                    // Наследуем "ценность" от родителя + вариации
+                    // +++ КОРРЕКТНОЕ НАСЛЕДОВАНИЕ ЦЕННОСТИ +++
                     float parentValue = GetParentCellValue(parentIndex);
                     float value = parentValue * 0.7f + 
-                                 SimplexNoise(position * 0.01f, BaseSeed + i) * 0.3f;
+                                 SimplexNoise(position * 0.01f, BaseSeed + parentIndex * 100 + i) * 0.3f;
                     
                     Sites[sitesGenerated] = position;
                     SiteMetadata[sitesGenerated] = new VoronoiSite
@@ -101,13 +109,49 @@ namespace VoronoiMapGen.Jobs
                         Position = position,
                         Index = sitesGenerated,
                         Level = level,
-                        ParentIndex = parentIndex,
+                        ParentIndex = parentIndex, // +++ КОРРЕКТНЫЙ ИНДЕКС РОДИТЕЛЬСКОЙ ЯЧЕЙКИ +++
                         Value = math.saturate(value)
                     };
                     
                     sitesGenerated++;
                 }
             }
+            
+            // +++ ДОПОЛНЕНИЕ: ЗАПОЛНЕНИЕ ОСТАВШИХСЯ ТОЧЕК ЕСЛИ НЕ ХВАТИЛО +++
+            if (sitesGenerated < Sites.Length)
+            {
+                // Заполняем оставшиеся точки глобально
+                for (int i = sitesGenerated; i < Sites.Length; i++)
+                {
+                    uint randomSeed = (uint)(BaseSeed + level * 1000 + i);
+                    Random random = new Unity.Mathematics.Random(randomSeed);
+                    
+                    float2 position = new float2(
+                        random.NextFloat(0, MapSize.x),
+                        random.NextFloat(0, MapSize.y)
+                    );
+                    
+                    Sites[i] = position;
+                    SiteMetadata[i] = new VoronoiSite
+                    {
+                        Position = position,
+                        Index = i,
+                        Level = level,
+                        ParentIndex = -1, // Без родителя
+                        Value = 0.5f
+                    };
+                }
+            }
+        }
+    
+        // ... остальные методы без изменений ...
+
+        private float CalculateBaseValue(float2 position, LevelSettings settings)
+        {
+            // Специальная логика для базового уровня
+            float continentNoise = SimplexNoise(position * 0.0001f, BaseSeed);
+            float elevationBase = continentNoise * 0.8f + 0.2f;
+            return math.saturate(elevationBase);
         }
         
         private int CalculateCellSiteCount(VoronoiCell parentCell, LevelSettings settings)
@@ -123,7 +167,7 @@ namespace VoronoiMapGen.Jobs
             int seed = BaseSeed ^ parentIndex ^ index;
             uint randomSeed = (uint)(seed);
             if (randomSeed == 0) randomSeed = 1;
-            var random = new Unity.Mathematics.Random(randomSeed);
+            Random random = new Unity.Mathematics.Random(randomSeed);
             
             // Генерируем внутри ячейки (упрощенный пример)
             float maxOffset = settings.ScaleFactor * 50f;

@@ -21,12 +21,12 @@ namespace VoronoiMapGen.Systems
             int level,
             in NativeList<DelaunayTriangle> triangles)
         {
-            var voronoiEdges = new NativeList<VoronoiEdge>(math.max(4, sites.Length * 3), Allocator.TempJob);
-            var voronoiCells = new NativeList<VoronoiCell>(math.max(4, sites.Length), Allocator.TempJob);
+            NativeList<VoronoiEdge> voronoiEdges = new NativeList<VoronoiEdge>(math.max(4, sites.Length * 3), Allocator.TempJob);
+            NativeList<VoronoiCell> voronoiCells = new NativeList<VoronoiCell>(math.max(4, sites.Length), Allocator.TempJob);
 
-            var job = new VoronoiConstructionJob
+            VoronoiConstructionJob job = new VoronoiConstructionJob
             {
-                Triangles = triangles,
+                Triangles = triangles.AsArray(),
                 Sites = sites,
                 SiteMetadata = siteMetadata,
                 Level = level,
@@ -34,7 +34,7 @@ namespace VoronoiMapGen.Systems
                 Cells = voronoiCells
             };
 
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             job.Run(); // предполагается, что VoronoiConstructionJob реализован как IJob и синхронно заполняет списки
             sw.Stop();
             Debug.Log($"  VoronoiConstructionJob.Run() finished in {sw.ElapsedMilliseconds} ms; voronoiEdges={voronoiEdges.Length}, voronoiCells={voronoiCells.Length}");

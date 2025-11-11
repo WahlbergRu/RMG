@@ -15,21 +15,21 @@ namespace VoronoiMapGen.Rendering
         {
             if (!settings.DrawRoads) return;
 
-            var edgeQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
-            var cellQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiCell>());
+            EntityQuery edgeQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
+            EntityQuery cellQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiCell>());
 
-            using var edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
-            using var cells = cellQuery.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
+            using NativeArray<VoronoiEdge> edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
+            using NativeArray<VoronoiCell> cells = cellQuery.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
 
-            var processed = new HashSet<(int, int)>(new EdgeComparer());
+            HashSet<(int, int)> processed = new HashSet<(int, int)>(new EdgeComparer());
 
-            foreach (var edge in edges)
+            foreach (VoronoiEdge edge in edges)
             {
-                var key = MeshUtils.EdgeKey(edge.SiteA, edge.SiteB);
+                (int, int) key = MeshUtils.EdgeKey(edge.SiteA, edge.SiteB);
                 if (!processed.Add(key)) continue;
 
-                var cellA = FindCell(cells, edge.SiteA);
-                var cellB = FindCell(cells, edge.SiteB);
+                VoronoiCell? cellA = FindCell(cells, edge.SiteA);
+                VoronoiCell? cellB = FindCell(cells, edge.SiteB);
                 if (!cellA.HasValue || !cellB.HasValue) continue;
 
                 float2 a = cellA.Value.Centroid;
@@ -37,7 +37,7 @@ namespace VoronoiMapGen.Rendering
 
                 float3 center = new float3((a.x + b.x) * 0.5f, 0f, (a.y + b.y) * 0.5f);
 
-                var mesh = MeshUtils.CreateQuadMeshLocal(a, b, center, settings.RoadWidth, "RoadSegment");
+                Mesh mesh = MeshUtils.CreateQuadMeshLocal(a, b, center, settings.RoadWidth, "RoadSegment");
                 MeshUtils.CreateSegmentEntity(em, mesh, material, typeof(RoadEntityTag), center);
             }
         }

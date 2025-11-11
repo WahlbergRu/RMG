@@ -23,7 +23,7 @@ namespace VoronoiMapGen.Rendering
             float3 dir = math.normalize(bL - aL);
             float3 perp = new float3(-dir.z, 0f, dir.x) * (width * 0.5f);
 
-            var verts = new[]
+            Vector3[] verts = new[]
             {
                 new Vector3(aL.x + perp.x, 0f, aL.z + perp.z),
                 new Vector3(aL.x - perp.x, 0f, aL.z - perp.z),
@@ -31,9 +31,9 @@ namespace VoronoiMapGen.Rendering
                 new Vector3(bL.x + perp.x, 0f, bL.z + perp.z)
             };
 
-            var tris = new[] { 0, 1, 3, 1, 2, 3 };
+            int[] tris = new[] { 0, 1, 3, 1, 2, 3 };
 
-            var mesh = new Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            Mesh mesh = new Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             mesh.SetVertices(verts);
             mesh.SetTriangles(tris, 0);
             mesh.RecalculateBounds();
@@ -43,10 +43,10 @@ namespace VoronoiMapGen.Rendering
 
         public static void CreateSegmentEntity(EntityManager em, Mesh mesh, Material material, System.Type tagType, float3 worldPos)
         {
-            var array = new RenderMeshArray(new[] { material }, new[] { mesh });
-            var desc  = new RenderMeshDescription(UnityEngine.Rendering.ShadowCastingMode.Off, false);
+            RenderMeshArray array = new RenderMeshArray(new[] { material }, new[] { mesh });
+            RenderMeshDescription desc  = new RenderMeshDescription(UnityEngine.Rendering.ShadowCastingMode.Off, false);
 
-            var entity = em.CreateEntity();
+            Entity entity = em.CreateEntity();
 
             RenderMeshUtility.AddComponents(entity, em, desc, array,
                 MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));

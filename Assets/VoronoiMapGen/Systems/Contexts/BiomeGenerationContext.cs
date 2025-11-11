@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Diagnostics;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Jobs;
+using Debug = UnityEngine.Debug;
 
 namespace VoronoiMapGen.Contexts
 {
@@ -38,14 +39,14 @@ namespace VoronoiMapGen.Contexts
             Cells = new NativeArray<VoronoiCell>(_level1Cells.Length, Allocator.TempJob);
             Biomes = new NativeArray<CellBiome>(_level1Cells.Length, Allocator.TempJob);
 
-            using var sitePositions = GetSitePositions(_maxSiteIndex);
+            using NativeArray<float2> sitePositions = GetSitePositions(_maxSiteIndex);
 
             for (int i = 0; i < _level1Cells.Length; i++)
             {
-                var e = _level1Cells[i];
+                Entity e = _level1Cells[i];
                 Cells[i] = _em.GetComponentData<VoronoiCell>(e);
 
-                var siteIndex = Cells[i].SiteIndex;
+                int siteIndex = Cells[i].SiteIndex;
                 if (siteIndex >= 0 && siteIndex <= _maxSiteIndex)
                     Sites[i] = sitePositions[siteIndex];
                 else
@@ -58,18 +59,18 @@ namespace VoronoiMapGen.Contexts
 
         private NativeArray<float2> GetSitePositions(int maxSiteIndex)
         {
-            var sitePositions = new NativeArray<float2>(maxSiteIndex + 1, Allocator.TempJob);
+            NativeArray<float2> sitePositions = new NativeArray<float2>(maxSiteIndex + 1, Allocator.TempJob);
             for (int i = 0; i < sitePositions.Length; i++)
                 sitePositions[i] = float2.zero;
 
-            var query = _em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiSite>());
+            EntityQuery query = _em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiSite>());
 
             // This version requires JobHandle output
             NativeArray<VoronoiSite> sites = query.ToComponentDataArray<VoronoiSite>(Allocator.TempJob);
 
             for (int i = 0; i < sites.Length; i++)
             {
-                var s = sites[i];
+                VoronoiSite s = sites[i];
                 if (s.Level == (int)DetailLevel.Regional && s.Index <= maxSiteIndex)
                     sitePositions[s.Index] = s.Position;
             }
@@ -87,7 +88,7 @@ namespace VoronoiMapGen.Contexts
                 return;
             }
 
-            var biomeJob = new BiomeAssignmentJob
+            BiomeAssignmentJob biomeJob = new BiomeAssignmentJob
             {
                 Cells = Cells,
                 Sites = Sites,
@@ -96,7 +97,7 @@ namespace VoronoiMapGen.Contexts
                 MapRadius = math.length(_settings.MapSize) * 0.5f
             };
 
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             biomeJob.Schedule(Sites.Length, 64).Complete();
             sw.Stop();
             Debug.Log($"  BiomeAssignmentJob completed in {sw.ElapsedMilliseconds} ms");
@@ -110,10 +111,10 @@ namespace VoronoiMapGen.Contexts
                 return;
             }
 
-            var biomesAdded = 0;
+            int biomesAdded = 0;
             for (int i = 0; i < _level1Cells.Length; i++)
             {
-                var cellEntity = _level1Cells[i];
+                Entity cellEntity = _level1Cells[i];
                 if (!_em.Exists(cellEntity)) continue;
 
                 if (!_em.HasComponent<CellBiome>(cellEntity))
