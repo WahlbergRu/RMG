@@ -10,7 +10,7 @@ namespace VoronoiMapGen.Rendering
     {
         public static (int, int) EdgeKey(int a, int b) => (math.min(a, b), math.max(a, b));
 
-        public static Mesh CreateQuadMeshLocal(float2 a, float2 b, float3 centerWorld, float width, string name)
+        public static UnityEngine.Mesh CreateQuadMeshLocal(float2 a, float2 b, float3 centerWorld, float width, string name)
         {
             float3 aW = new float3(a.x, 0f, a.y);
             float3 bW = new float3(b.x, 0f, b.y);
@@ -33,7 +33,7 @@ namespace VoronoiMapGen.Rendering
 
             var tris = new[] { 0, 1, 3, 1, 2, 3 };
 
-            var mesh = new Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            var mesh = new UnityEngine.Mesh { name = name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             mesh.SetVertices(verts);
             mesh.SetTriangles(tris, 0);
             mesh.RecalculateBounds();
@@ -41,7 +41,7 @@ namespace VoronoiMapGen.Rendering
             return mesh;
         }
 
-        public static void CreateSegmentEntity(EntityManager em, Mesh mesh, Material material, System.Type tagType, float3 worldPos)
+        public static void CreateSegmentEntity(EntityManager em, UnityEngine.Mesh mesh, Material material, System.Type tagType, float3 worldPos)
         {
             var array = new RenderMeshArray(new[] { material }, new[] { mesh });
             var desc  = new RenderMeshDescription(UnityEngine.Rendering.ShadowCastingMode.Off, false);

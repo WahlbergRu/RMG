@@ -23,7 +23,7 @@ namespace VoronoiMapGen.Rendering
             using var entities = query.ToEntityArray(Allocator.Temp);
             if (entities.Length == 0) return;
 
-            var meshes   = new List<Mesh>();
+            var meshes   = new List<UnityEngine.Mesh>();
             var cellList = new List<Entity>();
 
             foreach (var entity in entities)
@@ -48,13 +48,13 @@ namespace VoronoiMapGen.Rendering
                 SetupCellEntity(em, cellList[i], renderMeshArray, desc, i);
         }
 
-        private static Mesh CreateMeshFromCellLocal(EntityManager em, Entity entity,
+        private static UnityEngine.Mesh CreateMeshFromCellLocal(EntityManager em, Entity entity,
             DynamicBuffer<CellPolygonVertex> verts, DynamicBuffer<CellTriIndex> tris)
         {
             var cell = em.GetComponentData<VoronoiCell>(entity);
             var c = cell.Centroid;
 
-            var mesh = new Mesh
+            var mesh = new UnityEngine.Mesh
             {
                 name = $"CellMesh_{entity.Index}",
                 indexFormat = IndexFormat.UInt32
