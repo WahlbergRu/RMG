@@ -143,8 +143,6 @@ namespace VoronoiMapGen.Jobs
                 }
             }
         }
-    
-        // ... остальные методы без изменений ...
 
         private float CalculateBaseValue(float2 position, LevelSettings settings)
         {

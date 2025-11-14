@@ -12,7 +12,7 @@ using Debug = UnityEngine.Debug;
 
 namespace VoronoiMapGen.Systems
 {
-    [UpdateInGroup(typeof(InitializationSystemGroup))]
+    [UpdateInGroup(typeof(SimulationSystemGroup))]
     public partial class MapGenerationSystem : SystemBase
     {
         private EntityQuery _settingsQuery;
@@ -166,7 +166,7 @@ namespace VoronoiMapGen.Systems
                     m_StageSW.Restart();
                 }
             }
-
+            
             // ---------- NEXT STAGES ----------
             if (m_CurrentStage > 0)
             {

@@ -2,6 +2,8 @@
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Rendering;
+using Unity.Transforms;
 using UnityEngine;
 using VoronoiMapGen.Components;
 
@@ -169,6 +171,17 @@ namespace VoronoiMapGen.Systems
                 LODThreshold = levelSettings.LODThreshold,
                 RenderThreshold = levelSettings.RenderThreshold
             });
+
+            if (!em.HasComponent<LocalToWorld>(entity))
+            {
+                em.AddComponent<LocalToWorld>(entity);
+            }
+            if (!em.HasComponent<WorldRenderBounds>(entity))
+            {
+                em.AddComponentData(entity, new WorldRenderBounds { 
+                    Value = new AABB { Center = float3.zero, Extents = new float3(10, 10, 10) } 
+                });
+            }
         }
     }
 }

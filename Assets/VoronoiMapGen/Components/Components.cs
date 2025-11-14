@@ -428,6 +428,8 @@ namespace VoronoiMapGen.Components
     /// Добавляется к ребрам Вороной, которые представляют границы биомов.
     /// </summary>
     public struct BorderEntityTag : IComponentData { }
+    public struct WaterEntityTag : IComponentData { }
+    public struct RenderingBuiltTag : IComponentData { }
     
     // Параметры рельефа
     public struct TerrainData : IComponentData
@@ -463,6 +465,23 @@ namespace VoronoiMapGen.Components
         public float HeightVariation;    // Колебания высоты
     }
     
+    // Для флага "грязной" ячейки (требует перестроения меша)
+    public struct CellDirtyFlag : IComponentData {}
+
+    // Для хранения вершин полигона ячейки
+    public struct CellPolygonVertex : IBufferElementData 
+    {
+        public float3 Value;
+    }
+
+    // Для хранения индексов треугольников
+    public struct CellTriIndex : IBufferElementData 
+    {
+        public int Value;
+    }
+
+    // Тег для отметки о построенной геометрии
+    public struct GeometryBuiltTag : IComponentData {}
     
     public struct MapGenerationProgress : IComponentData
     {
