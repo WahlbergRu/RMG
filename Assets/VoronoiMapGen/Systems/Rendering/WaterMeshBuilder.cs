@@ -19,7 +19,7 @@ namespace VoronoiMapGen.Systems.Rendering
             Debug.Log("[Water] Starting water surface generation...");
 
             // 1. Собираем водные ячейки
-            var waterCells = GetWaterCells(em);
+            NativeArray<Entity> waterCells = GetWaterCells(em);
             if (waterCells.Length == 0)
             {
                 Debug.LogWarning("[Water] No water cells found");
@@ -28,14 +28,14 @@ namespace VoronoiMapGen.Systems.Rendering
             Debug.Log($"[Water] Found {waterCells.Length} water cells");
 
             // 2. Объединяем смежные водные ячейки в группы
-            var waterGroups = GroupWaterCells(em, waterCells);
+            List<NativeList<Entity>> waterGroups = GroupWaterCells(em, waterCells);
             // ВАЖНО: waterCells.Dispose() должен быть вызван после использования
             waterCells.Dispose(); // Исправление утечки
 
             // 3. Создаем меш для каждой группы
             for (int i = 0; i < waterGroups.Count; i++)
             {
-                var group = waterGroups[i];
+                NativeList<Entity> group = waterGroups[i];
                 CreateWaterMesh(em, group, material, settings, i);
                 group.Dispose(); // Освобождаем каждую группу NativeList
             }
@@ -58,7 +58,7 @@ namespace VoronoiMapGen.Systems.Rendering
             // Однако, ToEntityArray не поддерживает 'using' напрямую в C# 7.3 и ниже так же, как другие NativeContainers.
             // Лучший способ - получить массив и вручную вызвать Dispose.
             // Или обернуть в using var, как показано ниже.
-            using var tempQuery = query; // Убедимся, что Query освобождается
+            using EntityQuery tempQuery = query; // Убедимся, что Query освобождается
             return tempQuery.ToEntityArray(Allocator.TempJob); // Этот массив должен быть освобождён вызывающим
             // --- ИСПРАВЛЕНИЕ ---
             // Нужно освободить массив, возвращённый ToEntityArray.
@@ -68,27 +68,27 @@ namespace VoronoiMapGen.Systems.Rendering
 
         private static List<NativeList<Entity>> GroupWaterCells(EntityManager em, NativeArray<Entity> waterCells)
         {
-            var groups = new List<NativeList<Entity>>();
-            var visited = new HashSet<Entity>();
+            List<NativeList<Entity>> groups = new List<NativeList<Entity>>();
+            HashSet<Entity> visited = new HashSet<Entity>();
 
-            foreach (var cellEntity in waterCells)
+            foreach (Entity cellEntity in waterCells)
             {
                 if (visited.Contains(cellEntity)) continue;
 
-                var currentGroup = new NativeList<Entity>(Allocator.TempJob); // Используем TempJob для производительности
+                NativeList<Entity> currentGroup = new NativeList<Entity>(Allocator.TempJob); // Используем TempJob для производительности
                 Queue<Entity> queue = new Queue<Entity>();
                 queue.Enqueue(cellEntity);
 
                 while (queue.Count > 0)
                 {
-                    var current = queue.Dequeue();
+                    Entity current = queue.Dequeue();
                     if (!visited.Add(current)) continue; // Уже посещён
 
                     currentGroup.Add(current);
 
                     // Найти соседей и добавить их в очередь
-                    var neighbors = GetCellNeighbors(em, current);
-                    foreach (var neighbor in neighbors)
+                    List<Entity> neighbors = GetCellNeighbors(em, current);
+                    foreach (Entity neighbor in neighbors)
                     {
                         if (em.HasComponent<WaterEntityTag>(neighbor) && !visited.Contains(neighbor))
                         {
@@ -113,14 +113,14 @@ namespace VoronoiMapGen.Systems.Rendering
         // --- ИСПРАВЛЕНИЕ ОШИБКИ CS1061 ---
         private static List<Entity> GetCellNeighbors(EntityManager em, Entity cellEntity)
         {
-            var neighbors = new List<Entity>();
-            var cell = em.GetComponentData<VoronoiCell>(cellEntity); // Получаем компонент VoronoiCell
+            List<Entity> neighbors = new List<Entity>();
+            VoronoiCell cell = em.GetComponentData<VoronoiCell>(cellEntity); // Получаем компонент VoronoiCell
             int currentSiteIndex = cell.SiteIndex; // Извлекаем SiteIndex
 
             EntityQuery edgeQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
-            using var edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.TempJob); // Получаем компоненты, а не сущности
+            using NativeArray<VoronoiEdge> edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.TempJob); // Получаем компоненты, а не сущности
 
-            foreach (var edge in edges) // edge теперь компонент VoronoiEdge
+            foreach (VoronoiEdge edge in edges) // edge теперь компонент VoronoiEdge
             {
                 // Проверяем, является ли текущая ячейка одним из участников ребра
                 if (edge.SiteA == currentSiteIndex || edge.SiteB == currentSiteIndex)
@@ -145,11 +145,11 @@ namespace VoronoiMapGen.Systems.Rendering
         private static Entity FindCellBySiteIndex(EntityManager em, int siteIndex)
         {
             EntityQuery cellQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiCell>());
-            using var cellEntities = cellQuery.ToEntityArray(Allocator.TempJob);
+            using NativeArray<Entity> cellEntities = cellQuery.ToEntityArray(Allocator.TempJob);
 
-            foreach (var entity in cellEntities)
+            foreach (Entity entity in cellEntities)
             {
-                var cell = em.GetComponentData<VoronoiCell>(entity);
+                VoronoiCell cell = em.GetComponentData<VoronoiCell>(entity);
                 if (cell.SiteIndex == siteIndex)
                 {
                     return entity;
@@ -165,9 +165,9 @@ namespace VoronoiMapGen.Systems.Rendering
             // Простой подход: создаем один меш, охватывающий все ячейки в группе
             // Более сложная реализация может строить меш по вершинам краевых ячеек
             float3 averagePos = float3.zero;
-            foreach (var entity in cellGroup)
+            foreach (Entity entity in cellGroup)
             {
-                var cell = em.GetComponentData<VoronoiCell>(entity);
+                VoronoiCell cell = em.GetComponentData<VoronoiCell>(entity);
                 averagePos += new float3(cell.Centroid.x, 0, cell.Centroid.y); // Высоту можно уточнить
             }
             averagePos /= cellGroup.Length;
@@ -206,7 +206,7 @@ namespace VoronoiMapGen.Systems.Rendering
             em.AddComponentData(meshEntity, new LocalToWorld { Value = float4x4.Translate(averagePos) });
 
             // Устанавливаем границы рендеринга
-            var bounds = new AABB { Center = averagePos, Extents = new float3(60, 1, 60) };
+            AABB bounds = new AABB { Center = averagePos, Extents = new float3(60, 1, 60) };
             em.AddComponentData(meshEntity, new WorldRenderBounds { Value = bounds });
 
             Debug.Log($"[Water] Created mesh for group {groupIndex} with {cellGroup.Length} cells at {averagePos}");

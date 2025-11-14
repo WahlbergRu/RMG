@@ -4,7 +4,8 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 using VoronoiMapGen.Components;
-using System.Collections.Generic; // Добавлено для IComparer<>
+using System.Collections.Generic;
+using Random = Unity.Mathematics.Random; // Добавлено для IComparer<>
 
 namespace VoronoiMapGen.Systems
 {
@@ -14,16 +15,15 @@ namespace VoronoiMapGen.Systems
     /// </summary>
     [BurstCompile]
     [UpdateInGroup(typeof(SimulationSystemGroup))] 
-    [UpdateAfter(typeof(MapGenerationSystem))]
     public partial struct VoronoiGeometryBuildSystem : ISystem
     {
-        public void OnCreate(ref SystemState state)
-        {
-            state.RequireForUpdate<MapGeneratedTag>();
-            state.RequireForUpdate<VoronoiCell>();
-            state.RequireForUpdate<VoronoiEdge>();
-        }
-        
+        // public void OnCreate(ref SystemState state)
+        // {
+        //     state.RequireForUpdate<MapGeneratedTag>();
+        //     state.RequireForUpdate<VoronoiCell>();
+        //     state.RequireForUpdate<VoronoiEdge>();
+        // }
+        //
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
@@ -31,27 +31,27 @@ namespace VoronoiMapGen.Systems
             if (SystemAPI.HasSingleton<GeometryBuiltTag>() || !SystemAPI.HasSingleton<MapGeneratedTag>())
                 return;
                 
-            var mapSettings = SystemAPI.GetSingleton<MapSettings>();
-            var edgeQuery = SystemAPI.QueryBuilder().WithAll<VoronoiEdge>().Build();
-            using var edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
+            MapSettings mapSettings = SystemAPI.GetSingleton<MapSettings>();
+            EntityQuery edgeQuery = SystemAPI.QueryBuilder().WithAll<VoronoiEdge>().Build();
+            using NativeArray<VoronoiEdge> edges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.Temp);
             if (edges.Length == 0) return;
 
-            var cellQuery = SystemAPI.QueryBuilder().WithAll<VoronoiCell>().Build();
-            using var cells = cellQuery.ToEntityArray(Allocator.Temp);
+            EntityQuery cellQuery = SystemAPI.QueryBuilder().WithAll<VoronoiCell>().Build();
+            using NativeArray<Entity> cells = cellQuery.ToEntityArray(Allocator.Temp);
             if (cells.Length == 0) return;
 
-            var ecb = new EntityCommandBuffer(Allocator.Temp);
-            var random = new Unity.Mathematics.Random((uint)mapSettings.Seed); // Явное указание namespace
+            EntityCommandBuffer ecb = new EntityCommandBuffer(Allocator.Temp);
+            Random random = new Unity.Mathematics.Random((uint)mapSettings.Seed); // Явное указание namespace
 
             for (int i = 0; i < cells.Length; i++)
             {
-                var entity = cells[i];
-                var cell = state.EntityManager.GetComponentData<VoronoiCell>(entity);
-                ProcessCell(entity, cell, edges, ecb, ref state, random, mapSettings.MapSize);
-                ecb.AddComponent<VoronoiCellMeshTag>(entity); // Используем существующий тег
+                Entity entity = cells[i];
+                VoronoiCell cell = state.EntityManager.GetComponentData<VoronoiCell>(entity);
+                ProcessCell(entity, cell, edges, ecb, ref state);
+                // ecb.AddComponent<VoronoiCellMeshTag>(entity);
             }
             
-            if (SystemAPI.TryGetSingletonEntity<MapSettings>(out var settingsEntity))
+            if (SystemAPI.TryGetSingletonEntity<MapSettings>(out Entity settingsEntity))
             {
                 ecb.AddComponent<GeometryBuiltTag>(settingsEntity);
             }
@@ -59,32 +59,41 @@ namespace VoronoiMapGen.Systems
             ecb.Dispose();
         }
 
-        private static void ProcessCell(Entity entity, VoronoiCell cell, NativeArray<VoronoiEdge> allEdges, 
-                                       EntityCommandBuffer ecb, ref SystemState state, Unity.Mathematics.Random random, float2 mapSize) // Явное указание namespace
+        private static void ProcessCell(Entity entity, VoronoiCell cell, NativeArray<VoronoiEdge> allEdges,
+                               EntityCommandBuffer ecb, ref SystemState state)
         {
-            // Инициализируем буферы если их нет
-            if (!state.EntityManager.HasBuffer<CellPolygonVertex>(entity))
+            // Подготовка/получение буферов: если есть — взять через EntityManager, иначе добавить через ECB и использовать возвращаемый буфер
+            DynamicBuffer<CellPolygonVertex> vertsBuf;
+            DynamicBuffer<CellTriIndex> triBuf;
+
+            if (state.EntityManager.HasBuffer<CellPolygonVertex>(entity))
             {
-                ecb.AddBuffer<CellPolygonVertex>(entity);
+                vertsBuf = state.EntityManager.GetBuffer<CellPolygonVertex>(entity);
+                vertsBuf.Clear();
             }
-            
-            if (!state.EntityManager.HasBuffer<CellTriIndex>(entity))
+            else
             {
-                ecb.AddBuffer<CellTriIndex>(entity);
+                vertsBuf = ecb.AddBuffer<CellPolygonVertex>(entity);
             }
 
-            var vertsBuf = ecb.AddBuffer<CellPolygonVertex>(entity);
-            var triBuf = ecb.AddBuffer<CellTriIndex>(entity);
+            if (state.EntityManager.HasBuffer<CellTriIndex>(entity))
+            {
+                triBuf = state.EntityManager.GetBuffer<CellTriIndex>(entity);
+                triBuf.Clear();
+            }
+            else
+            {
+                triBuf = ecb.AddBuffer<CellTriIndex>(entity);
+            }
 
-            var unique = new NativeHashSet<ulong>(32, Allocator.Temp);
-            var verts = new NativeList<float2>(32, Allocator.Temp);
+            // Собираем уникальные вершины во временные структуры
+            NativeHashSet<ulong> unique = new NativeHashSet<ulong>(32, Allocator.Temp);
+            NativeList<float2> verts = new NativeList<float2>(32, Allocator.Temp);
 
             int siteIndex = cell.SiteIndex;
-            
-            // Собираем все вершины, принадлежащие этой ячейке
             for (int i = 0; i < allEdges.Length; i++)
             {
-                var edge = allEdges[i];
+                VoronoiEdge edge = allEdges[i];
                 if (edge.SiteA == siteIndex || edge.SiteB == siteIndex)
                 {
                     AddUniqueVertex(edge.VertexA, ref unique, ref verts);
@@ -92,38 +101,39 @@ namespace VoronoiMapGen.Systems
                 }
             }
 
-            // Если вершин меньше 3 - создаём заглушку (должно быть редко)
+            // Если вершин < 3 — подстраховка
             if (verts.Length < 3)
             {
-                Debug.LogWarning($"Cell at {cell.Centroid} has only {verts.Length} vertices. Creating fallback geometry.");
                 CreateFallbackGeometry(ref verts, cell.Centroid);
             }
 
-            // Сортировка по часовой стрелке вокруг центроида
+            // Сортируем перед записью в vertsBuf!
             SortVerticesClockwise(ref verts, cell.Centroid);
 
-            // Записываем вершины с высотой
-            for (int i = 0; i < verts.Length; i++)
+            // Записываем вершины с высотой (после сортировки)
+            for (int v = 0; v < verts.Length; v++)
             {
-                float height = SampleCellHeight(verts[i], cell, random, mapSize);
-                vertsBuf.Add(new CellPolygonVertex { 
-                    Value = new float3(verts[i].x, height, verts[i].y) 
+                vertsBuf.Add(new CellPolygonVertex
+                {
+                    Value = new float3(verts[v].x, 0f, verts[v].y)
                 });
             }
 
-            // Fan triangulation: треугольники (0, i, i+1)
+            // Создаём фан-триангуляцию в формате, ожидаемом MeshUpdateSystem: для каждого треугольника — ПАРА индексов (i, i+1).
             CreateFanTriangulation(verts.Length, triBuf);
 
-            // Помечаем, что меш нужно обновить
-            ecb.AddComponent<CellDirtyFlag>(entity);
+            // Помечаем меш как грязный
+            if (!state.EntityManager.HasComponent<CellDirtyFlag>(entity))
+                ecb.AddComponent<CellDirtyFlag>(entity);
 
             unique.Dispose();
             verts.Dispose();
         }
 
+
         private static void AddUniqueVertex(float2 vertex, ref NativeHashSet<ulong> unique, ref NativeList<float2> verts)
         {
-            var hash = HashFloat2(vertex);
+            ulong hash = HashFloat2(vertex);
             if (unique.Add(hash))
             {
                 verts.Add(vertex);
@@ -150,21 +160,29 @@ namespace VoronoiMapGen.Systems
 
         private static void CreateFanTriangulation(int vertexCount, DynamicBuffer<CellTriIndex> triBuf)
         {
+            triBuf.Clear();
+
             if (vertexCount >= 3)
             {
+                // Для фан-триангуляции мы хотим, чтобы каждый треугольник был (0, i, i+1),
+                // но в буфере сохраняем только пары (i, i+1) — MeshUpdate вставит центр (0).
                 for (int i = 1; i < vertexCount - 1; i++)
                 {
-                    triBuf.Add(new CellTriIndex { Value = 0 });
                     triBuf.Add(new CellTriIndex { Value = i });
                     triBuf.Add(new CellTriIndex { Value = i + 1 });
                 }
             }
             else
             {
-                // Минимальный треугольник для отладки
-                triBuf.Add(new CellTriIndex { Value = 0 });
-                triBuf.Add(new CellTriIndex { Value = 1 });
-                triBuf.Add(new CellTriIndex { Value = 2 });
+                // Защита: создаём "маленький" треугольник из существующих вершин (если есть), но безопасно.
+                // Используем модуль, чтобы не выйти за границы.
+                for (int i = 0; i < 2; i++)
+                {
+                    int a = (i + 0) % math.max(1, vertexCount);
+                    int b = (i + 1) % math.max(1, vertexCount);
+                    triBuf.Add(new CellTriIndex { Value = a });
+                    triBuf.Add(new CellTriIndex { Value = b });
+                }
             }
         }
 
@@ -222,10 +240,10 @@ namespace VoronoiMapGen.Systems
 
             public int Compare(float2 a, float2 b)
             {
-                var da = a - _center;
-                var db = b - _center;
-                var angleA = math.atan2(da.y, da.x);
-                var angleB = math.atan2(db.y, db.x);
+                float2 da = a - _center;
+                float2 db = b - _center;
+                float angleA = math.atan2(da.y, da.x);
+                float angleB = math.atan2(db.y, db.x);
                 return angleB.CompareTo(angleA); // reverse for clockwise
             }
         }

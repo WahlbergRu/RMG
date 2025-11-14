@@ -17,7 +17,7 @@ namespace VoronoiMapGen.Systems.Rendering
             if (!settings.DrawRoads) return;
             Debug.Log("[Roads] Starting road network generation...");
             // 1. Собираем все города (L2)
-            var cityEntities = GetCityEntities(em);
+            NativeArray<Entity> cityEntities = GetCityEntities(em);
             if (cityEntities.Length == 0)
             {
                 Debug.LogWarning("[Roads] No cities found for road generation");
@@ -35,11 +35,11 @@ namespace VoronoiMapGen.Systems.Rendering
                 ComponentType.ReadOnly<DetailLevelData>(),
                 ComponentType.ReadOnly<VoronoiCellMeshTag>()
             );
-            using var entities = cityQuery.ToEntityArray(Allocator.Temp);
-            var cityEntities = new NativeList<Entity>(Allocator.Temp);
-            foreach (var entity in entities)
+            using NativeArray<Entity> entities = cityQuery.ToEntityArray(Allocator.Temp);
+            NativeList<Entity> cityEntities = new NativeList<Entity>(Allocator.Temp);
+            foreach (Entity entity in entities)
             {
-                var levelData = em.GetComponentData<DetailLevelData>(entity);
+                DetailLevelData levelData = em.GetComponentData<DetailLevelData>(entity);
                 if (levelData.Level == DetailLevel.Settlement) // L2 - города
                 {
                     cityEntities.Add(entity);
@@ -51,16 +51,16 @@ namespace VoronoiMapGen.Systems.Rendering
             MapSettings settings, NativeArray<Entity> cityEntities)
         {
             // Создаем граф для алгоритма минимального остовного дерева
-            var graph = new NativeList<RoadConnection>(Allocator.Temp);
+            NativeList<RoadConnection> graph = new NativeList<RoadConnection>(Allocator.Temp);
             // 1. Собираем все возможные соединения между городами
             for (int i = 0; i < cityEntities.Length; i++)
             {
-                var cityA = em.GetComponentData<VoronoiCell>(cityEntities[i]);
-                var posA = new float3(cityA.Centroid.x, 0, cityA.Centroid.y);
+                VoronoiCell cityA = em.GetComponentData<VoronoiCell>(cityEntities[i]);
+                float3 posA = new float3(cityA.Centroid.x, 0, cityA.Centroid.y);
                 for (int j = i + 1; j < cityEntities.Length; j++)
                 {
-                    var cityB = em.GetComponentData<VoronoiCell>(cityEntities[j]);
-                    var posB = new float3(cityB.Centroid.x, 0, cityB.Centroid.y);
+                    VoronoiCell cityB = em.GetComponentData<VoronoiCell>(cityEntities[j]);
+                    float3 posB = new float3(cityB.Centroid.x, 0, cityB.Centroid.y);
                     float distance = math.distance(posA, posB);
                     // Добавляем соединение в граф
                     graph.Add(new RoadConnection {
@@ -74,9 +74,9 @@ namespace VoronoiMapGen.Systems.Rendering
             graph.Sort(new RoadConnectionComparer());
             
             // 3. Строим минимальное остовное дерево
-            var mst = new NativeList<RoadConnection>(Allocator.Temp);
-            var uf = new UnionFind(cityEntities.Length);
-            foreach (var connection in graph)
+            NativeList<RoadConnection> mst = new NativeList<RoadConnection>(Allocator.Temp);
+            UnionFind uf = new UnionFind(cityEntities.Length);
+            foreach (RoadConnection connection in graph)
             {
                 int indexA = GetCityIndex(cityEntities, connection.CityA);
                 int indexB = GetCityIndex(cityEntities, connection.CityB);
@@ -108,8 +108,8 @@ namespace VoronoiMapGen.Systems.Rendering
         private static void CreateRoadSegment(EntityManager em, Material material, 
             MapSettings settings, RoadConnection connection)
         {
-            var cityA = em.GetComponentData<VoronoiCell>(connection.CityA);
-            var cityB = em.GetComponentData<VoronoiCell>(connection.CityB);
+            VoronoiCell cityA = em.GetComponentData<VoronoiCell>(connection.CityA);
+            VoronoiCell cityB = em.GetComponentData<VoronoiCell>(connection.CityB);
             float3 posA = new float3(cityA.Centroid.x, GetRoadHeight(em, cityA), cityA.Centroid.y);
             float3 posB = new float3(cityB.Centroid.x, GetRoadHeight(em, cityB), cityB.Centroid.y);
             float3 center = (posA + posB) * 0.5f;
@@ -191,10 +191,10 @@ namespace VoronoiMapGen.Systems.Rendering
             // Выбираем самые короткие оставшиеся соединения
             for (int i = 0, added = 0; i < allConnections.Length && added < secondaryRoadCount; i++)
             {
-                var connection = allConnections[i];
+                RoadConnection connection = allConnections[i];
                 // Проверяем, есть ли уже дорога в MST
                 bool existsInMST = false;
-                foreach (var mstConn in mst)
+                foreach (RoadConnection mstConn in mst)
                 {
                     if ((mstConn.CityA == connection.CityA && mstConn.CityB == connection.CityB) ||
                         (mstConn.CityA == connection.CityB && mstConn.CityB == connection.CityA))

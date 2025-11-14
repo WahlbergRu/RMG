@@ -250,7 +250,7 @@ namespace VoronoiMapGen.Systems
                     parentCellsAllocated = true;
                 }
                 
-                var (sites, siteMeta) = SiteGenerator.Generate(
+                (NativeArray<float2> sites, NativeArray<VoronoiSite> siteMeta) = SiteGenerator.Generate(
                     m_Settings, 
                     m_LevelSettings, 
                     m_LevelSettings[levelIndex], 

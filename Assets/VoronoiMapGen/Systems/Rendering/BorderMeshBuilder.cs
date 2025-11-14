@@ -20,7 +20,7 @@ namespace VoronoiMapGen.Systems.Rendering
             Debug.Log("[Borders] Starting biome border generation...");
 
             // 1. Собираем все ячейки с биомами
-            var biomeCells = GetBiomeCells(em);
+            NativeArray<Entity> biomeCells = GetBiomeCells(em);
             if (biomeCells.Length == 0)
             {
                 Debug.LogWarning("[Borders] No biome cells found for border generation");
@@ -29,7 +29,7 @@ namespace VoronoiMapGen.Systems.Rendering
             Debug.Log($"[Borders] Found {biomeCells.Length} biome cells");
 
             // 2. Находим границы между разными биомами
-            var borderSegments = BuildBiomeBorders(em, biomeCells);
+            NativeList<BorderSegmentData> borderSegments = BuildBiomeBorders(em, biomeCells);
             biomeCells.Dispose(); // Освобождаем массив после использования
 
             // 3. Создаем меш для границ
@@ -52,33 +52,33 @@ namespace VoronoiMapGen.Systems.Rendering
         // --- ИСПРАВЛЕНИЕ УТЕЧЕК И ЛОГИКИ ---
         private static NativeList<BorderSegmentData> BuildBiomeBorders(EntityManager em, NativeArray<Entity> biomeCells)
         {
-            var segments = new NativeList<BorderSegmentData>(Allocator.TempJob); // Используем NativeList для эффективности
+            NativeList<BorderSegmentData> segments = new NativeList<BorderSegmentData>(Allocator.TempJob); // Используем NativeList для эффективности
 
             // Получаем все ребра Вороного
             EntityQuery edgeQuery = em.CreateEntityQuery(ComponentType.ReadOnly<VoronoiEdge>());
-            using var allEdges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.TempJob); // Правильно получаем компоненты
+            using NativeArray<VoronoiEdge> allEdges = edgeQuery.ToComponentDataArray<VoronoiEdge>(Allocator.TempJob); // Правильно получаем компоненты
 
             // Создаем lookup-таблицу: SiteIndex -> Entity
-            var siteToEntityMap = new NativeHashMap<int, Entity>(biomeCells.Length, Allocator.TempJob);
-            foreach (var cellEntity in biomeCells)
+            NativeHashMap<int, Entity> siteToEntityMap = new NativeHashMap<int, Entity>(biomeCells.Length, Allocator.TempJob);
+            foreach (Entity cellEntity in biomeCells)
             {
-                var cell = em.GetComponentData<VoronoiCell>(cellEntity);
+                VoronoiCell cell = em.GetComponentData<VoronoiCell>(cellEntity);
                 siteToEntityMap[cell.SiteIndex] = cellEntity;
             }
 
-            foreach (var edge in allEdges) // edge - это компонент VoronoiEdge
+            foreach (VoronoiEdge edge in allEdges) // edge - это компонент VoronoiEdge
             {
                 // Проверяем, есть ли обе ячейки в нашем списке биомных ячеек
                 if (siteToEntityMap.TryGetValue(edge.SiteA, out Entity cellAEntity) &&
                     siteToEntityMap.TryGetValue(edge.SiteB, out Entity cellBEntity))
                 {
-                    var biomeA = em.GetComponentData<CellBiome>(cellAEntity);
-                    var biomeB = em.GetComponentData<CellBiome>(cellBEntity);
+                    CellBiome biomeA = em.GetComponentData<CellBiome>(cellAEntity);
+                    CellBiome biomeB = em.GetComponentData<CellBiome>(cellBEntity);
 
                     if (biomeA.Type != biomeB.Type) // Граница между разными биомами
                     {
-                        var cellA = em.GetComponentData<VoronoiCell>(cellAEntity);
-                        var cellB = em.GetComponentData<VoronoiCell>(cellBEntity);
+                        VoronoiCell cellA = em.GetComponentData<VoronoiCell>(cellAEntity);
+                        VoronoiCell cellB = em.GetComponentData<VoronoiCell>(cellBEntity);
 
                         segments.Add(new BorderSegmentData
                         {
@@ -105,7 +105,7 @@ namespace VoronoiMapGen.Systems.Rendering
             // Здесь создадим сущности с RenderMeshUnmanaged для каждого сегмента
             for (int i = 0; i < segments.Length; i++)
             {
-                var segment = segments[i];
+                BorderSegmentData segment = segments[i];
                 // Пример создания тонкого цилиндра для границы
                 Mesh lineMesh = CreateLineMesh(segment.PositionA, segment.PositionB, 0.1f); // 0.1f - толщина линии
 

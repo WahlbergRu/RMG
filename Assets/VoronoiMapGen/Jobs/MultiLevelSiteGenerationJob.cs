@@ -24,7 +24,7 @@ namespace VoronoiMapGen.Jobs
         public void Execute()
         {
             int level = ParentLevel + 1;
-            var settings = LevelSettings[level];
+            LevelSettings settings = LevelSettings[level];
     
             // +++ КРИТИЧЕСКИ ВАЖНО: КОРРЕКТНАЯ ПРОВЕРКА УРОВНЕЙ +++
             if (ParentLevel == -1)

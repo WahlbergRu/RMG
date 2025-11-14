@@ -411,6 +411,9 @@ namespace VoronoiMapGen.Components
     /// </summary>
     public struct MapGenerationInProgress : IComponentData {}
     
+    
+    public struct VoronoiMeshGeneratedTag : IComponentData {}
+    
     /// <summary>
     /// Тег: ячейка имеет сгенерированный меш.
     /// Добавляется к ячейкам, которые должны отображаться.
