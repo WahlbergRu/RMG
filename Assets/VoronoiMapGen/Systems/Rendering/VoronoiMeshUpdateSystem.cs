@@ -33,6 +33,8 @@ namespace VoronoiMapGen.Systems
             var mda = UnityEngine.Mesh.AllocateWritableMeshData(entities.Length);
             var meshes = new UnityEngine.Mesh[entities.Length];
 
+            Debug.Log("entities " + entities.Length);
+
             for (int i = 0; i < entities.Length; i++)
             {
                 var e = entities[i];
@@ -42,20 +44,38 @@ namespace VoronoiMapGen.Systems
                 var md = mda[i];
                 md.SetVertexBufferParams(verts.Length,
                     new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
-                md.SetIndexBufferParams(triPairs.Length * 3 / 2, IndexFormat.UInt32);
+                int requiredIndexCount = (triPairs.Length - 2) * 3;
+                md.SetIndexBufferParams(requiredIndexCount, IndexFormat.UInt32);
 
                 var vb = md.GetVertexData<Vector3>();
                 for (int v = 0; v < verts.Length; v++)
                     vb[v] = new Vector3(verts[v].Value.x, 0f, verts[v].Value.y);
 
                 var ib = md.GetIndexData<int>();
+                // Debug.Log("ib " + ib.Length);
+                // Debug.Log("triPairs " + triPairs.Length);
+
+
                 int idx = 0;
-                for (int t = 0; t < triPairs.Length; t += 2)
+                // Цикл от 0 до triPairs.Length - 3 (включительно), чтобы использовать i и i+1
+                for (int it = 0; it < triPairs.Length - 2; it++)
                 {
-                    ib[idx++] = 0;
-                    ib[idx++] = triPairs[t + 0].Value;
-                    ib[idx++] = triPairs[t + 1].Value;
+                    // Проверяем, не выйдем ли мы за пределы массива перед записью
+                    if (idx + 2 < ib.Length)
+                    {
+                        ib[idx++] = 0; // Индекс центральной точки (C)
+                        ib[idx++] = triPairs[it].Value;     // Индекс текущей вершины (P[i])
+                        ib[idx++] = triPairs[it + 1].Value; // Индекс следующей вершины (P[i+1])
+                        // Это формирует треугольник (C, P[i], P[i+1])
+                    }
+                    else
+                    {
+                        // Это условие в норме не должно сработать, если SetIndexBufferParams был рассчитан правильно
+                        Debug.LogError($"Index buffer would overflow at tri index {it}. Current idx: {idx}, Buffer length: {ib.Length}");
+                        break;
+                    }
                 }
+
 
                 md.subMeshCount = 1;
                 md.SetSubMesh(0, new SubMeshDescriptor(0, idx) { topology = MeshTopology.Triangles },

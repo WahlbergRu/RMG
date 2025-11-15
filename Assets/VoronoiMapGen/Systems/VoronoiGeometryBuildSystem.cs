@@ -160,28 +160,16 @@ namespace VoronoiMapGen.Systems
 
         private static void CreateFanTriangulation(int vertexCount, DynamicBuffer<CellTriIndex> triBuf)
         {
-            triBuf.Clear();
-
+            Debug.Log(vertexCount);
             if (vertexCount >= 3)
             {
                 // Для фан-триангуляции мы хотим, чтобы каждый треугольник был (0, i, i+1),
                 // но в буфере сохраняем только пары (i, i+1) — MeshUpdate вставит центр (0).
                 for (int i = 1; i < vertexCount - 1; i++)
                 {
+                    triBuf.Add(new CellTriIndex { Value = i - 1 });
                     triBuf.Add(new CellTriIndex { Value = i });
                     triBuf.Add(new CellTriIndex { Value = i + 1 });
-                }
-            }
-            else
-            {
-                // Защита: создаём "маленький" треугольник из существующих вершин (если есть), но безопасно.
-                // Используем модуль, чтобы не выйти за границы.
-                for (int i = 0; i < 2; i++)
-                {
-                    int a = (i + 0) % math.max(1, vertexCount);
-                    int b = (i + 1) % math.max(1, vertexCount);
-                    triBuf.Add(new CellTriIndex { Value = a });
-                    triBuf.Add(new CellTriIndex { Value = b });
                 }
             }
         }
