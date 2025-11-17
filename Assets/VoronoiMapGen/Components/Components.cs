@@ -483,6 +483,13 @@ namespace VoronoiMapGen.Components
         public int Value;
     }
 
+    /// <summary> Опциональная локальная позиция ячейки. Если не задана — берем позицию сайта. </summary>
+    public struct CellLocalPosition : IComponentData
+    {
+        public float3 Value;
+    }
+    
+
     // Тег для отметки о построенной геометрии
     public struct GeometryBuiltTag : IComponentData {}
     

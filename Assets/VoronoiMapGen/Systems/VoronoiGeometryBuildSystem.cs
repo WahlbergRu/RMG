@@ -24,7 +24,7 @@ namespace VoronoiMapGen.Systems
         //     state.RequireForUpdate<VoronoiEdge>();
         // }
         //
-        [BurstCompile]
+        // [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             // Выполняется только один раз после полной генерации

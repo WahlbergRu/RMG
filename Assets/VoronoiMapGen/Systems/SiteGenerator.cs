@@ -11,23 +11,19 @@ namespace VoronoiMapGen.Systems
 {
     public static class SiteGenerator
     {
+        // <<< ИЗМЕНЕНО: Добавлен parentSiteMetadata >>>
         public static (NativeArray<float2> sites, NativeArray<VoronoiSite> siteMetadata) Generate(
             MapSettings settings,
             in NativeArray<LevelSettings> levelSettingsNative,
             LevelSettings levelSettings,
             int level,
-            in NativeArray<VoronoiCell> parentCells)
+            in NativeArray<VoronoiCell> parentCells, // Должен быть Persistent или TempJob
+            in NativeArray<float2> parentSites,      // Должен быть Persistent или TempJob
+            in NativeArray<VoronoiSite> parentSiteMetadata) // Должен быть Persistent или TempJob (НОВОЕ)
         {
-            NativeArray<float2> sites = new NativeArray<float2>(levelSettings.SiteCount, Allocator.TempJob);
-            NativeArray<VoronoiSite> siteMetadata = new NativeArray<VoronoiSite>(levelSettings.SiteCount, Allocator.TempJob);
-
-            NativeArray<VoronoiCell> currentParentCells = parentCells;
-            bool createdTempParent = false;
-            if (!parentCells.IsCreated || parentCells.Length == 0 || level == 0)
-            {
-                currentParentCells = new NativeArray<VoronoiCell>(0, Allocator.TempJob);
-                createdTempParent = true;
-            }
+            // --- Создаём ВОЗВРАЩАЕМЫЕ массивы с Persistent ---
+            NativeArray<float2> sites = new NativeArray<float2>(levelSettings.SiteCount, Allocator.Persistent);
+            NativeArray<VoronoiSite> siteMetadata = new NativeArray<VoronoiSite>(levelSettings.SiteCount, Allocator.Persistent);
 
             MultiLevelSiteGenerationJob siteJob = new MultiLevelSiteGenerationJob
             {
@@ -35,20 +31,20 @@ namespace VoronoiMapGen.Systems
                 MapSize = settings.MapSize,
                 BaseSeed = settings.Seed,
                 ParentLevel = level - 1,
-                ParentCells = currentParentCells,
-                Sites = sites,
-                SiteMetadata = siteMetadata
+                ParentCells = parentCells, // Эти массивы должны быть Persistent или TempJob
+                ParentSites = parentSites, // Эти массивы должны быть Persistent или TempJob
+                ParentSiteMetadata = parentSiteMetadata, // <<< ПЕРЕДАЁМ parentSiteMetadata (НОВОЕ)
+                Sites = sites, // Возвращаемый массив - Persistent
+                SiteMetadata = siteMetadata // Возвращаемый массив - Persistent
             };
 
             Stopwatch sw = Stopwatch.StartNew();
             JobHandle jobHandle = siteJob.Schedule(default);
-            jobHandle.Complete();
+            jobHandle.Complete(); // <<< ВАЖНО: Дожидаемся завершения джоба СРАЗУ
             sw.Stop();
             Debug.Log($"[Level {level}] MultiLevelSiteGenerationJob completed in {sw.ElapsedMilliseconds} ms");
 
-            if (createdTempParent)
-                currentParentCells.Dispose();
-
+            // Возвращаем Persistent массивы. MapGenerationSystem принимает на себя владение.
             return (sites, siteMetadata);
         }
     }

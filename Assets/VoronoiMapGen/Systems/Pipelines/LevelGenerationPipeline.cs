@@ -1,25 +1,33 @@
-﻿using Unity.Collections;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Jobs;
+using Debug = UnityEngine.Debug;
 
 namespace VoronoiMapGen.Systems
 {
-    /// <summary>
-    /// Пайплайн генерации уровней карты:
-    /// сайты → триангуляция Делоне → диаграмма Вороного → ECS сущности.
-    /// </summary>
     public static class LevelGenerationPipeline
     {
+        // <<< ДОБАВЛЕНО: Поле для хранения siteMetadata каждого уровня >>>
+        private static NativeArray<VoronoiSite>[] s_LevelSiteMetadata;
+
         public static void GenerateLevels(
             EntityManager em,
             MapSettings mapSettings,
             NativeArray<LevelSettings> levels)
         {
             NativeArray<VoronoiCell> parentCells = default;
+            NativeArray<float2> parentSites = default;
+            NativeArray<VoronoiSite> parentSiteMetadata = default; // <<< НОВОЕ
+
+            // <<< ДОБАВЛЕНО: Инициализация s_LevelSiteMetadata >>>
+            s_LevelSiteMetadata = new NativeArray<VoronoiSite>[levels.Length];
 
             for (int level = 0; level < levels.Length; level++)
             {
@@ -28,8 +36,8 @@ namespace VoronoiMapGen.Systems
 
                 // === 1. Генерация сайтов ===
                 NativeArray<float2> sites;
-                NativeArray<VoronoiSite> siteMetadata;
-                (sites, siteMetadata) = SiteGenerator.Generate(mapSettings, levels, levelSettings, level, parentCells);
+                NativeArray<VoronoiSite> siteMetadata; // <<< ИЗМЕНЕНО имя переменной >>>
+                (sites, siteMetadata) = SiteGenerator.Generate(mapSettings, levels, levelSettings, level, parentCells, parentSites, parentSiteMetadata); // <<< ПЕРЕДАЁМ parentSiteMetadata
                 Debug.Log($"[Level {level}] Sites generated: {sites.Length}");
 
                 // === 2. Триангуляция Делоне ===
@@ -39,7 +47,7 @@ namespace VoronoiMapGen.Systems
                 DelaunayTriangulationJob delaunayJob = new DelaunayTriangulationJob
                 {
                     Sites = sites,
-                    SiteMetadata = siteMetadata,
+                    SiteMetadata = siteMetadata, // <<< ИСПОЛЬЗУЕМ siteMetadata
                     Level = level,
                     Triangles = triangles,
                     Edges = edges
@@ -57,7 +65,7 @@ namespace VoronoiMapGen.Systems
                 {
                     Triangles = triangles.AsArray(),
                     Sites = sites,
-                    SiteMetadata = siteMetadata,
+                    SiteMetadata = siteMetadata, // <<< ИСПОЛЬЗУЕМ siteMetadata
                     Level = level,
                     Cells = voronoiCells,
                     Edges = voronoiEdges
@@ -73,26 +81,56 @@ namespace VoronoiMapGen.Systems
                     level,
                     levelSettings,
                     sites,
-                    siteMetadata,
+                    siteMetadata, // <<< ИСПОЛЬЗУЕМ siteMetadata
                     voronoiCells,
                     voronoiEdges);
                 Debug.Log($"[Level {level}] ECS entities created");
 
-                // === 5. Копируем данные для parentCells следующего уровня ===
+                // === 5. Копируем данные для следующего уровня ===
                 if (parentCells.IsCreated)
                 {
                     parentCells.Dispose();
                 }
+                if (parentSites.IsCreated)
+                {
+                    parentSites.Dispose();
+                }
+                // <<< НОВОЕ: Освобождаем parentSiteMetadata >>>
+                if (parentSiteMetadata.IsCreated) // <<< НОВОЕ
+                {                                 // <<< НОВОЕ
+                    parentSiteMetadata.Dispose(); // <<< НОВОЕ
+                }                                 // <<< НОВОЕ
 
-                parentCells = new NativeArray<VoronoiCell>(voronoiCells.Length, Allocator.TempJob);
+                // --- ЗАПОЛНЯЕМ parentCells, parentSites И parentSiteMetadata ДЛЯ СЛЕДУЮЩЕГО УРОВНЯ ---
+                parentCells = new NativeArray<VoronoiCell>(voronoiCells.Length, Allocator.Temp);
                 for (int i = 0; i < voronoiCells.Length; i++)
                 {
                     parentCells[i] = voronoiCells[i];
                 }
 
+                parentSites = new NativeArray<float2>(sites.Length, Allocator.Temp);
+                for (int i = 0; i < sites.Length; i++)
+                {
+                    parentSites[i] = sites[i]; // <<< Сохраняем позиции точек текущего уровня
+                }
+
+                // <<< НОВОЕ: Заполняем parentSiteMetadata для следующего уровня >>>
+                parentSiteMetadata = new NativeArray<VoronoiSite>(siteMetadata.Length, Allocator.Temp); // <<< НОВОЕ
+                for (int i = 0; i < siteMetadata.Length; i++)                                         // <<< НОВОЕ
+                {                                                                                     // <<< НОВОЕ
+                    parentSiteMetadata[i] = siteMetadata[i];                                          // <<< НОВОЕ
+                }                                                                                     // <<< НОВОЕ
+
+                // <<< НОВОЕ: Сохраняем siteMetadata в s_LevelSiteMetadata >>>
+                if (s_LevelSiteMetadata[level].IsCreated) // <<< НОВОЕ
+                {                                         // <<< НОВОЕ
+                    s_LevelSiteMetadata[level].Dispose(); // Освобождаем старый, если был (на всякий случай) // <<< НОВОЕ
+                }                                         // <<< НОВОЕ
+                s_LevelSiteMetadata[level] = siteMetadata; // <<< НОВОЕ
+
                 // === 6. Освобождение временных буферов ===
                 sites.Dispose();
-                siteMetadata.Dispose();
+                siteMetadata.Dispose(); // <<< ОСВОБОЖДАЕМ siteMetadata
                 triangles.Dispose();
                 edges.Dispose();
                 voronoiEdges.Dispose();
@@ -101,11 +139,30 @@ namespace VoronoiMapGen.Systems
                 Debug.Log($"[Level {level}] Temporary buffers disposed");
             }
 
-            // Освобождаем parentCells после завершения всех уровней
+            // <<< НОВОЕ: Освобождаем s_LevelSiteMetadata >>>
+            if (s_LevelSiteMetadata != null) // <<< НОВОЕ
+            {                                // <<< НОВОЕ
+                for (int i = 0; i < s_LevelSiteMetadata.Length; i++) // <<< НОВОЕ
+                {                                                     // <<< НОВОЕ
+                    if (s_LevelSiteMetadata[i].IsCreated)             // <<< НОВОЕ
+                        s_LevelSiteMetadata[i].Dispose();             // <<< НОВОЕ
+                }                                                     // <<< НОВОЕ
+                s_LevelSiteMetadata = null;                           // <<< НОВОЕ
+            }                                                         // <<< НОВОЕ
+
+            // Освобождаем parentCells, parentSites и parentSiteMetadata после завершения всех уровней
             if (parentCells.IsCreated)
             {
                 parentCells.Dispose();
             }
+            if (parentSites.IsCreated)
+            {
+                parentSites.Dispose();
+            }
+            if (parentSiteMetadata.IsCreated) // <<< НОВОЕ
+            {                                 // <<< НОВОЕ
+                parentSiteMetadata.Dispose(); // <<< НОВОЕ
+            }                                 // <<< НОВОЕ
         }
     }
 }
