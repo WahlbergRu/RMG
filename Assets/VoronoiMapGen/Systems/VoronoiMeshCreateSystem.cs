@@ -17,7 +17,6 @@ namespace VoronoiMapGen.Systems
     /// </summary>
     [WorldSystemFilter(WorldSystemFilterFlags.Presentation)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    [UpdateAfter(typeof(VoronoiGeometryBuildSystem))]
     public partial struct VoronoiMeshCreateSystem : ISystem
     {
         private static Material s_DefaultMaterial;
@@ -32,7 +31,7 @@ namespace VoronoiMapGen.Systems
         public void OnUpdate(ref SystemState state)
         {
             if (!SystemAPI.HasSingleton<MapGeneratedTag>()) return;
-            if (SystemAPI.HasSingleton<VoronoiMeshGeneratedTag>()) return;
+            // if (SystemAPI.HasSingleton<VoronoiMeshGeneratedTag>()) return;
 
             var query = SystemAPI.QueryBuilder()
                 .WithAll<VoronoiCell, CellPolygonVertex, CellTriIndex>()

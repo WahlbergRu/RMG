@@ -69,11 +69,12 @@ namespace VoronoiMapGen.Systems
 
             // Триангуляция Делоне
             var triangles = new NativeList<Components.DelaunayTriangle>(request.SiteCount * 2, Allocator.TempJob);
+            var edgesList = new NativeList<int3>(request.SiteCount * 3, Allocator.TempJob); // Вынесли в отдельную переменную
             var triangulationJob = new DelaunayTriangulationJob
             {
                 Sites = sites,
                 Triangles = triangles,
-                Edges = new NativeList<int3>(request.SiteCount * 3, Allocator.TempJob)
+                Edges = edgesList
             };
             triangulationJob.Run();
 
@@ -191,10 +192,11 @@ namespace VoronoiMapGen.Systems
 
             Debug.Log(report);
 
-            // Освобождаем ресурсы
+            // Освобождаем ресурсы - теперь включая edgesList
             siteEntities.Dispose();
             sites.Dispose();
             triangles.Dispose();
+            edgesList.Dispose(); // <-- Освобождение edgesList, который создавался в triangulationJob
             edges.Dispose();
             cells.Dispose();
             cellEntities.Dispose();
