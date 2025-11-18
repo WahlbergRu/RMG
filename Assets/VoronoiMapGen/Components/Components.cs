@@ -10,6 +10,7 @@ namespace VoronoiMapGen.Components
     /// Хранит параметры, определяющие как генерируется и отображается каждый уровень.
     /// Используется как буферный компонент, привязанный к основной сущности карты.
     /// </summary>
+    [System.Serializable]
     public struct LevelSettings : IBufferElementData
     {
         /// <summary>
@@ -117,6 +118,12 @@ namespace VoronoiMapGen.Components
         /// true = карта полностью сгенерирована на текущем уровне детализации.
         /// </summary>
         public bool IsGenerated;
+        
+        /// <summary>
+        /// Массив цветов биомов
+        /// </summary>
+        public FixedList512Bytes<BiomeColorEntry> BiomeColors;
+        
     }
 
     /// <summary>
@@ -395,6 +402,12 @@ namespace VoronoiMapGen.Components
         Forest,    // Лесные массивы
         Mountain,  // Горные регионы
         Snow       // Снежные вершины
+    }
+    
+    public struct BiomeColorEntry : IComponentData
+    {
+        public BiomeType biomeType;
+        public float4 color;
     }
     
     // Теги (пустые компоненты для маркировки сущностей)

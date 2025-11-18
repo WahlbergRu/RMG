@@ -1,15 +1,15 @@
-﻿// using Unity.Burst; // УБРАНО
+﻿using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine; // Для Debug.Log
+using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Utils;
 using Random = Unity.Mathematics.Random;
 
 namespace VoronoiMapGen.Jobs
 {
-    // [BurstCompile] // УБРАНО
+    [BurstCompile]
     public struct MultiLevelSiteGenerationJob : IJob
     {
         [ReadOnly] public NativeArray<LevelSettings> LevelSettings;
@@ -17,14 +17,13 @@ namespace VoronoiMapGen.Jobs
         [ReadOnly] public int BaseSeed;
         [ReadOnly] public int ParentLevel;
 
-        // Добавьте это:
-        [ReadOnly] public NativeArray<float2> ParentSites; // Позиции родительских точек (Persistent или Temp)
-        [ReadOnly] public NativeArray<VoronoiCell> ParentCells; // (Persistent или Temp)
-        [ReadOnly] public NativeArray<VoronoiSite> ParentSiteMetadata; // <<< НОВОЕ: Метаданные родительских точек
+        [ReadOnly] public NativeArray<float2> ParentSites;
+        [ReadOnly] public NativeArray<VoronoiCell> ParentCells;
+        [ReadOnly] public NativeArray<VoronoiSite> ParentSiteMetadata;
 
-        public NativeArray<float2> Sites; // Целевой массив (Persistent)
-        public NativeArray<VoronoiSite> SiteMetadata; // Целевой массив (Persistent)
-
+        public NativeArray<float2> Sites;
+        public NativeArray<VoronoiSite> SiteMetadata;
+        
         public void Execute()
         {
             int level = ParentLevel + 1;
@@ -38,45 +37,80 @@ namespace VoronoiMapGen.Jobs
             {
                 if (ParentCells.IsCreated && ParentCells.Length > 0 &&
                     ParentSites.IsCreated && ParentSites.Length > 0 &&
-                    ParentSiteMetadata.IsCreated && ParentSiteMetadata.Length > 0) // <<< ПРОВЕРКА parentSiteMetadata (НОВОЕ)
+                    ParentSiteMetadata.IsCreated && ParentSiteMetadata.Length > 0)
                 {
                     GenerateChildSites(level, settings);
                 }
                 else
                 {
-                    Debug.Log("Error: No parent sites, cells, or site metadata for level " + level); // <<< ИЗМЕНЕНО сообщение
-                    GenerateGlobalSites(level, settings); // Резервная логика
+                    Debug.Log("No parent data for level " + level + ", generating globally.");
+                    GenerateGlobalSites(level, settings);
                 }
             }
         }
 
-
         private void GenerateGlobalSites(int level, LevelSettings settings)
         {
-            for (int i = 0; i < Sites.Length; i++)
+            // Use a grid-based approach for L0 to ensure even distribution
+            if (level == 0)
             {
-                uint randomSeed = (uint)(BaseSeed + i * 397);
-                if (randomSeed == 0) randomSeed = 1;
-                Random random = new Unity.Mathematics.Random(randomSeed);
+                int gridCount = (int)math.ceil(math.sqrt(Sites.Length));
+                float cellWidth = MapSize.x / gridCount;
+                float cellHeight = MapSize.y / gridCount;
 
-                float2 position = new float2(
-                    random.NextFloat(0, MapSize.x),
-                    random.NextFloat(0, MapSize.y)
-                );
-
-                float value = level == 0
-                    ? CalculateBaseValue(position, settings)
-                    : settings.ValueBias + SimplexNoise(position * 0.001f, BaseSeed) * settings.ValueScale;
-
-                Sites[i] = position;
-                SiteMetadata[i] = new VoronoiSite
+                for (int i = 0; i < Sites.Length; i++)
                 {
-                    Position = position,
-                    Index = i,
-                    Level = level,
-                    ParentIndex = -1,
-                    Value = math.saturate(value)
-                };
+                    int x = i % gridCount;
+                    int y = i / gridCount;
+
+                    uint randomSeed = (uint)(BaseSeed + i * 397);
+                    if (randomSeed == 0) randomSeed = 1;
+                    Random random = new Unity.Mathematics.Random(randomSeed);
+
+                    float2 position = new float2(
+                        x * cellWidth + cellWidth * 0.5f + random.NextFloat(-cellWidth * 0.1f, cellWidth * 0.1f),
+                        y * cellHeight + cellHeight * 0.5f + random.NextFloat(-cellHeight * 0.1f, cellHeight * 0.1f)
+                    );
+
+                    float value = CalculateBaseValue(position, settings);
+
+                    Sites[i] = position;
+                    SiteMetadata[i] = new VoronoiSite
+                    {
+                        Position = position,
+                        Index = i,
+                        Level = level,
+                        ParentIndex = -1,
+                        Value = math.saturate(value)
+                    };
+                }
+            }
+            else
+            {
+                // Fallback to random for other levels if needed, though they should use GenerateChildSites
+                for (int i = 0; i < Sites.Length; i++)
+                {
+                    uint randomSeed = (uint)(BaseSeed + i * 397);
+                    if (randomSeed == 0) randomSeed = 1;
+                    Random random = new Unity.Mathematics.Random(randomSeed);
+
+                    float2 position = new float2(
+                        random.NextFloat(0, MapSize.x),
+                        random.NextFloat(0, MapSize.y)
+                    );
+
+                    float value = settings.ValueBias + SimplexNoise(position * 0.001f, BaseSeed) * settings.ValueScale;
+
+                    Sites[i] = position;
+                    SiteMetadata[i] = new VoronoiSite
+                    {
+                        Position = position,
+                        Index = i,
+                        Level = level,
+                        ParentIndex = -1,
+                        Value = math.saturate(value)
+                    };
+                }
             }
         }
 
@@ -94,12 +128,10 @@ namespace VoronoiMapGen.Jobs
                 for (int i = 0; i < cellSiteCount && sitesGenerated < Sites.Length; i++)
                 {
                     float2 parentPosition = ParentSites[parentIndex];
-                    // <<< НОВОЕ: Используем ParentSiteMetadata[parentIndex] для получения данных родителя >>>
-                    float parentValue = ParentSiteMetadata[parentIndex].Value; // <<< ИЗМЕНЕНО (НОВОЕ)
+                    float parentValue = ParentSiteMetadata[parentIndex].Value;
 
-                    float2 position = GeneratePointInCell(parentPosition, parentIndex, i, settings);
+                    float2 position = GeneratePointInCell(parentPosition, parentIndex, i, settings, level);
 
-                    // float parentValue = GetParentCellValue(parentIndex); // <<< УБРАНО (НОВОЕ)
                     float value = parentValue * 0.7f +
                                  SimplexNoise(position * 0.01f, BaseSeed + parentIndex * 100 + i) * 0.3f;
 
@@ -117,7 +149,8 @@ namespace VoronoiMapGen.Jobs
                 }
             }
 
-            if (sitesGenerated < Sites.Length)
+            // Fill remaining slots if necessary (shouldn't happen if SiteCount is correctly calculated)
+            if (sitesGenerated < Sites.Length && level > 0)
             {
                 for (int i = sitesGenerated; i < Sites.Length; i++)
                 {
@@ -142,6 +175,32 @@ namespace VoronoiMapGen.Jobs
             }
         }
 
+        private float2 GeneratePointInCell(float2 parentPosition, int parentIndex, int index, LevelSettings settings, int level)
+        {
+            int seed = BaseSeed ^ parentIndex ^ index;
+            uint randomSeed = (uint)(seed);
+            if (randomSeed == 0) randomSeed = 1;
+            Random random = new Unity.Mathematics.Random(randomSeed);
+
+            float scale;
+            if (level == 0)
+            {
+                // For L0, use a very small offset to keep points close to grid positions
+                scale = 10f; // Small fixed offset for initial grid stability
+            }
+            else
+            {
+                scale = settings.ScaleFactor * 50f;
+            }
+
+            float2 offset = new float2(
+                random.NextFloat(-scale, scale),
+                random.NextFloat(-scale, scale)
+            );
+
+            return parentPosition + offset;
+        }
+
         private float CalculateBaseValue(float2 position, LevelSettings settings)
         {
             float continentNoise = SimplexNoise(position * 0.0001f, BaseSeed);
@@ -153,27 +212,6 @@ namespace VoronoiMapGen.Jobs
         {
             return (int)(settings.SiteCount * 0.1f);
         }
-
-        // --- ИЗМЕНЕНО: Принимает parentPosition, а не cell ---
-        private float2 GeneratePointInCell(float2 parentPosition, int parentIndex, int index, LevelSettings settings)
-        {
-            int seed = BaseSeed ^ parentIndex ^ index;
-            uint randomSeed = (uint)(seed);
-            if (randomSeed == 0) randomSeed = 1;
-            Random random = new Unity.Mathematics.Random(randomSeed);
-
-            // Масштабируем offset в зависимости от уровня
-            float scale = settings.ScaleFactor * 50f; // Уменьшайте ScaleFactor для более глубоких уровней
-
-            float2 offset = new float2(
-                random.NextFloat(-scale, scale),
-                random.NextFloat(-scale, scale)
-            );
-
-            return parentPosition + offset;
-        }
-
-        // <<< УБРАНО: private float GetParentCellValue(int parentIndex) >>>
 
         private float SimplexNoise(float2 pos, int seed)
         {

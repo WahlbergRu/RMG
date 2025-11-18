@@ -1,5 +1,6 @@
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using VoronoiMapGen.Components;
@@ -13,153 +14,182 @@ namespace VoronoiMapGen.Jobs
         [ReadOnly] public NativeArray<float2> Sites;
         [ReadOnly] public NativeArray<VoronoiSite> SiteMetadata;
         [ReadOnly] public int Level;
+        [ReadOnly] public float2 MapSize;
 
-        // Вход / выход
-        public NativeList<DelaunayTriangle> Triangles;
-        public NativeList<int3> Edges;
+        [NativeDisableContainerSafetyRestriction] public NativeList<DelaunayTriangle> Triangles;
+        [NativeDisableContainerSafetyRestriction] public NativeList<int3> Edges;
 
         public void Execute()
         {
             if (Sites.Length < 3)
                 return;
 
-            // собираем точки уровня
-            NativeList<float2> levelSites = new NativeList<float2>(Sites.Length, Allocator.Temp);
-            NativeList<int> levelIndices = new NativeList<int>(Sites.Length, Allocator.Temp);
-
+            // Собираем индексы точек текущего уровня
+            NativeList<int> levelIndices = new NativeList<int>(Allocator.Temp);
             for (int i = 0; i < Sites.Length; i++)
             {
                 if (SiteMetadata[i].Level == Level)
                 {
-                    levelSites.Add(Sites[i]);
                     levelIndices.Add(i);
                 }
             }
 
-            if (levelSites.Length < 3)
+            if (levelIndices.Length < 3)
             {
-                levelSites.Dispose();
                 levelIndices.Dispose();
                 return;
             }
 
-            float2x2 bounds = CalculateBounds(levelSites.AsArray());
-            float2x3 superTriangle = CreateSuperTriangle(bounds.c0, bounds.c1);
-
-            // extendedSites: levelSites + 3 вершины супер-треугольника
-            NativeList<float2> extendedSites = new NativeList<float2>(levelSites.Length + 3, Allocator.Temp);
-            extendedSites.AddRange(levelSites.AsArray());
-            extendedSites.Add(superTriangle.c0);
-            extendedSites.Add(superTriangle.c1);
-            extendedSites.Add(superTriangle.c2);
-
-            int superA = levelSites.Length;
-            int superB = levelSites.Length + 1;
-            int superC = levelSites.Length + 2;
-
-            Triangles.Clear();
-            Edges.Clear();
-
-            // заранее добавляем супер-треугольник
-            DelaunayTriangle st = CreateTriangle(superA, superB, superC, extendedSites.AsArray());
-            Triangles.Add(st);
-
-            // Для каждого уровня вставляем точку (индексы 0..levelSites.Length-1)
-            for (int i = 0; i < levelSites.Length; i++)
+            // Создаем расширенный массив точек: обычные точки + 3 вершины супер-треугольника
+            int totalPoints = levelIndices.Length + 3;
+            NativeArray<float2> extendedSites = new NativeArray<float2>(totalPoints, Allocator.Temp);
+            
+            // Копируем обычные точки
+            for (int i = 0; i < levelIndices.Length; i++)
             {
-                AddPoint(i, extendedSites);
+                extendedSites[i] = Sites[levelIndices[i]];
             }
 
-            // удаляем треугольники со сторонами супер-треугольника и переводим индексы в глобальные (levelIndices)
-            int3 superIndices = new int3(superA, superB, superC);
-            RemoveSuperTriangleTriangles(superIndices, levelIndices);
+            // Вычисляем границы для супер-треугольника
+            float2 minBound = new float2(float.MaxValue, float.MaxValue);
+            float2 maxBound = new float2(float.MinValue, float.MinValue);
+            
+            for (int i = 0; i < levelIndices.Length; i++)
+            {
+                float2 pos = extendedSites[i];
+                minBound = math.min(minBound, pos);
+                maxBound = math.max(maxBound, pos);
+            }
+            
+            // Добавляем отступы для супер-треугольника
+            float padding = math.max(maxBound.x - minBound.x, maxBound.y - minBound.y) * 0.5f;
+            minBound -= new float2(padding, padding);
+            maxBound += new float2(padding, padding);
+            
+            // Создаем супер-треугольник
+            float2 center = (minBound + maxBound) * 0.5f;
+            float maxDim = math.max(maxBound.x - minBound.x, maxBound.y - minBound.y) * 1.5f;
+            
+            // Вершины супер-треугольника (индексы levelIndices.Length, levelIndices.Length+1, levelIndices.Length+2)
+            extendedSites[levelIndices.Length] = center + new float2(-maxDim, -maxDim * 0.5f);     // p1
+            extendedSites[levelIndices.Length + 1] = center + new float2(maxDim, -maxDim * 0.5f);  // p2
+            extendedSites[levelIndices.Length + 2] = center + new float2(0, maxDim);              // p3
 
-            // извлекаем рёбра
+            // Инициализируем триангуляцию с супер-треугольником
+            Triangles.Clear();
+            Triangles.Add(CreateTriangle(
+                levelIndices.Length,        // индекс p1
+                levelIndices.Length + 1,    // индекс p2
+                levelIndices.Length + 2,    // индекс p3
+                extendedSites
+            ));
+
+            // Вставляем все точки по одной
+            for (int i = 0; i < levelIndices.Length; i++)
+            {
+                InsertPoint(i, extendedSites, levelIndices.Length);
+            }
+
+            // Удаляем треугольники, содержащие вершины супер-треугольника
+            RemoveSuperTriangleTriangles(levelIndices.Length);
+
+            // Извлекаем рёбра
             ExtractEdgesFromTriangles();
 
+            // Очищаем память
             extendedSites.Dispose();
-            levelSites.Dispose();
             levelIndices.Dispose();
         }
 
-        /// <summary>
-        /// Извлекает рёбра: считаем как ключ нормализованный int2 (min, max).
-        /// Если ребро встречается ровно 1 раз -> внешнее ребро.
-        /// </summary>
-        private void ExtractEdgesFromTriangles()
+        private void InsertPoint(int pointIndex, NativeArray<float2> sites, int superTriangleStartIndex)
         {
-            // estimate capacity: triangles * 3
-            NativeHashMap<int2, int> edgeCount = new NativeHashMap<int2, int>(Triangles.Length * 3, Allocator.Temp);
-
+            NativeList<int> badTriangles = new NativeList<int>(Allocator.Temp);
+            
+            // Находим все треугольники, чья описанная окружность содержит точку
             for (int i = 0; i < Triangles.Length; i++)
             {
-                DelaunayTriangle t = Triangles[i];
-                AddEdgeCount(t.A, t.B, ref edgeCount);
-                AddEdgeCount(t.B, t.C, ref edgeCount);
-                AddEdgeCount(t.C, t.A, ref edgeCount);
-            }
-
-            Edges.Clear();
-            NativeArray<int2> keys = edgeCount.GetKeyArray(Allocator.Temp);
-            for (int i = 0; i < keys.Length; i++)
-            {
-                int2 key = keys[i];
-                if (edgeCount.TryGetValue(key, out int count) && count == 1)
+                DelaunayTriangle tri = Triangles[i];
+                if (tri.CircumRadius > 0f && IsPointInCircumCircle(sites[pointIndex], tri))
                 {
-                    Edges.Add(new int3(key.x, key.y, 0));
+                    badTriangles.Add(i);
                 }
             }
-            keys.Dispose();
+
+            if (badTriangles.Length == 0)
+            {
+                badTriangles.Dispose();
+                return;
+            }
+
+            // Считаем рёбра плохих треугольников
+            NativeHashMap<int2, int> edgeCount = new NativeHashMap<int2, int>(badTriangles.Length * 3, Allocator.Temp);
+            for (int i = 0; i < badTriangles.Length; i++)
+            {
+                int triIdx = badTriangles[i];
+                DelaunayTriangle tri = Triangles[triIdx];
+                AddEdgeToCount(tri.A, tri.B, ref edgeCount);
+                AddEdgeToCount(tri.B, tri.C, ref edgeCount);
+                AddEdgeToCount(tri.C, tri.A, ref edgeCount);
+            }
+
+            // Удаляем плохие треугольники
+            for (int i = badTriangles.Length - 1; i >= 0; i--)
+            {
+                Triangles.RemoveAtSwapBack(badTriangles[i]);
+            }
+
+            // Создаем новые треугольники из полигон.дырки и новой точки
+            using (NativeArray<int2> polygonEdges = edgeCount.GetKeyArray(Allocator.Temp))
+            {
+                for (int i = 0; i < polygonEdges.Length; i++)
+                {
+                    int2 edge = polygonEdges[i];
+                    if (edgeCount[edge] == 1) // Граница дырки
+                    {
+                        if (edge.x != pointIndex && edge.y != pointIndex)
+                        {
+                            DelaunayTriangle newTri = CreateTriangle(edge.x, edge.y, pointIndex, sites);
+                            if (newTri.CircumRadius > 0.001f) // Фильтр вырожденных треугольников
+                            {
+                                Triangles.Add(newTri);
+                            }
+                        }
+                    }
+                }
+            }
 
             edgeCount.Dispose();
+            badTriangles.Dispose();
         }
 
-        private void AddEdgeCount(int a, int b, ref NativeHashMap<int2, int> map)
+        private bool IsPointInCircumCircle(float2 point, DelaunayTriangle tri)
+        {
+            // Используем оптимизированный метод без sqrt
+            return math.distance(tri.CircumCenter, point) < tri.CircumRadius - 0.001f;
+        }
+
+        private void AddEdgeToCount(int a, int b, ref NativeHashMap<int2, int> map)
         {
             if (a == b) return;
-            int minIndex = math.min(a, b);
-            int maxIndex = math.max(a, b);
-            int2 key = new int2(minIndex, maxIndex);
-            if (map.TryGetValue(key, out int val))
+            int2 edge = new int2(math.min(a, b), math.max(a, b));
+            
+            if (map.TryGetValue(edge, out int count))
             {
-                map[key] = val + 1;
+                map[edge] = count + 1;
             }
             else
             {
-                map.TryAdd(key, 1);
+                map.Add(edge, 1);
             }
-        }
-
-        private float2x3 CreateSuperTriangle(float2 min, float2 max)
-        {
-            float2 center = (min + max) * 0.5f;
-            float2 size = max - min;
-            float maxDim = math.max(size.x, size.y);
-
-            float2 p1 = center + new float2(-2 * maxDim, -maxDim);
-            float2 p2 = center + new float2(0, 2 * maxDim);
-            float2 p3 = center + new float2(2 * maxDim, -maxDim);
-
-            return new float2x3(p1, p2, p3);
-        }
-
-        private float2x2 CalculateBounds(NativeArray<float2> sites)
-        {
-            float2 min = sites[0];
-            float2 max = sites[0];
-
-            for (int i = 1; i < sites.Length; i++)
-            {
-                min = math.min(min, sites[i]);
-                max = math.max(max, sites[i]);
-            }
-
-            return new float2x2(min, max);
         }
 
         private DelaunayTriangle CreateTriangle(int a, int b, int c, NativeArray<float2> sites)
         {
-            if (Utils.NativeCollectionsExtensions.CalculateCircumCircle(sites[a], sites[b], sites[c], out float2 center, out float radius))
+            float2 pA = sites[a];
+            float2 pB = sites[b];
+            float2 pC = sites[c];
+            
+            if (CalculateCircumCircle(pA, pB, pC, out float2 center, out float radius))
             {
                 return new DelaunayTriangle
                 {
@@ -170,127 +200,83 @@ namespace VoronoiMapGen.Jobs
                     CircumRadius = radius
                 };
             }
-
-            // возвращаем треугольник с нулевым радиусом — он будет отброшен
-            return new DelaunayTriangle { A = a, B = b, C = c, CircumRadius = -1f };
+            
+            // Возвращаем невалидный треугольник
+            return new DelaunayTriangle { CircumRadius = -1f };
         }
 
-        /// <summary>
-        /// Вставка точки: вычисляем "плохие" треугольники (их индексы), считаем все их ребра (edgeCount).
-        /// Рёбра, встретившиеся ровно 1 раз — образуют полигон. Удаляем плохие треугольники путём пересборки списка.
-        /// </summary>
-        private void AddPoint(int pointIndex, NativeList<float2> sites)
+        private bool CalculateCircumCircle(float2 a, float2 b, float2 c, out float2 center, out float radius)
         {
-            // bad triangles set
-            NativeList<int> badSet = new NativeList<int>(128, Allocator.Temp);
+            center = float2.zero;
+            radius = 0f;
+
+            // Проверка на вырожденный треугольник
+            float area = math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) * 0.5f;
+            if (area < 0.001f)
+                return false;
+
+            // Вычисление центра описанной окружности
+            float d = 2f * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+            if (math.abs(d) < 0.001f)
+                return false;
+
+            center.x = ((a.x * a.x + a.y * a.y) * (b.y - c.y) + 
+                        (b.x * b.x + b.y * b.y) * (c.y - a.y) + 
+                        (c.x * c.x + c.y * c.y) * (a.y - b.y)) / d;
+            
+            center.y = ((a.x * a.x + a.y * a.y) * (c.x - b.x) + 
+                        (b.x * b.x + b.y * b.y) * (a.x - c.x) + 
+                        (c.x * c.x + c.y * c.y) * (b.x - a.x)) / d;
+
+            radius = math.distance(center, a);
+            return true;
+        }
+
+        private void RemoveSuperTriangleTriangles(int superTriangleStartIndex)
+        {
+            // Удаляем треугольники, содержащие вершины супер-треугольника
+            for (int i = Triangles.Length - 1; i >= 0; i--)
+            {
+                DelaunayTriangle tri = Triangles[i];
+                if (tri.A >= superTriangleStartIndex || 
+                    tri.B >= superTriangleStartIndex || 
+                    tri.C >= superTriangleStartIndex)
+                {
+                    Triangles.RemoveAtSwapBack(i);
+                }
+            }
+        }
+
+        private void ExtractEdgesFromTriangles()
+        {
+            Edges.Clear();
+            if (Triangles.Length == 0) return;
+
+            NativeHashMap<int2, int> edgeMap = new NativeHashMap<int2, int>(Triangles.Length * 3, Allocator.Temp);
+            
+            // Считаем все ребра
             for (int i = 0; i < Triangles.Length; i++)
             {
                 DelaunayTriangle tri = Triangles[i];
-                if (tri.CircumRadius > 0f && Utils.NativeCollectionsExtensions.IsPointInCircle(sites[pointIndex], tri.CircumCenter, tri.CircumRadius))
+                AddEdgeToCount(tri.A, tri.B, ref edgeMap);
+                AddEdgeToCount(tri.B, tri.C, ref edgeMap);
+                AddEdgeToCount(tri.C, tri.A, ref edgeMap);
+            }
+
+            // Ищем граничные ребра (встречаются только один раз)
+            using (NativeArray<int2> keys = edgeMap.GetKeyArray(Allocator.Temp))
+            {
+                for (int i = 0; i < keys.Length; i++)
                 {
-                    badSet.Add(i);
-                }
-            }
-
-            if (badSet.Length == 0)
-            {
-                badSet.Dispose();
-                return;
-            }
-
-            // считаем рёбра плохих треугольников
-            NativeHashMap<int2, int> edgeCount = new NativeHashMap<int2, int>(badSet.Length * 3, Allocator.Temp);
-            for (int i = 0; i < badSet.Length; i++)
-            {
-                int triIdx = badSet[i];
-                DelaunayTriangle tri = Triangles[triIdx];
-                AddEdgeCount(tri.A, tri.B, ref edgeCount);
-                AddEdgeCount(tri.B, tri.C, ref edgeCount);
-                AddEdgeCount(tri.C, tri.A, ref edgeCount);
-            }
-
-            // пересобираем Triangles без плохих треугольников (эффективнее, чем RemoveAtSwapBack по индексам)
-            NativeList<DelaunayTriangle> newTriangles = new NativeList<DelaunayTriangle>(Triangles.Length - badSet.Length + 16, Allocator.Temp);
-            for (int i = 0; i < Triangles.Length; i++)
-            {
-                bool isBad = false;
-                // проверка наличия в badSet: можно сделать hashset, но для простоты и т.к. badSet обычно меньше,
-                // используем прямой поиск — если у вас часто много плохих треугольников, замените badSet на NativeHashSet.
-                // Чтобы не ухудшить случай большого badSet — если badSet.Length > Triangles.Length/4 — лучше конвертировать:
-                if (badSet.Length > Triangles.Length / 4)
-                {
-                    // конвертируем в hashset для быстрого поиска
-                    NativeHashSet<int> tmpHash = new NativeHashSet<int>(badSet.Length, Allocator.Temp);
-                    for (int k = 0; k < badSet.Length; k++) tmpHash.Add(badSet[k]);
-                    for (int k = 0; k < Triangles.Length; k++)
+                    int2 edge = keys[i];
+                    if (edgeMap[edge] == 1)
                     {
-                        if (!tmpHash.Contains(k))
-                            newTriangles.Add(Triangles[k]);
-                    }
-                    tmpHash.Dispose();
-                    // конец сборки
-                    i = Triangles.Length; // выйти из внешнего цикла
-                    break;
-                }
-                else
-                {
-                    // линейный поиск в badSet (для небольших badSet это быстрее, чем аллокация hashset)
-                    for (int j = 0; j < badSet.Length; j++)
-                    {
-                        if (badSet[j] == i) { isBad = true; break; }
-                    }
-                    if (!isBad)
-                        newTriangles.Add(Triangles[i]);
-                }
-            }
-
-            Triangles.Clear();
-            Triangles.AddRange(newTriangles.AsArray());
-
-            // Полигоны — рёбра с count == 1
-            NativeArray<int2> keys = edgeCount.GetKeyArray(Allocator.Temp);
-            for (int i = 0; i < keys.Length; i++)
-            {
-                int2 e = keys[i];
-                if (edgeCount.TryGetValue(e, out int count) && count == 1)
-                {
-                    if (e.x == e.y || e.x == pointIndex || e.y == pointIndex) continue;
-
-                    DelaunayTriangle newT = CreateTriangle(e.x, e.y, pointIndex, sites.AsArray());
-                    if (newT.CircumRadius > 0.0001f)
-                    {
-                        Triangles.Add(newT);
+                        Edges.Add(new int3(edge.x, edge.y, 0));
                     }
                 }
             }
-            keys.Dispose();
 
-            newTriangles.Dispose();
-            edgeCount.Dispose();
-            badSet.Dispose();
-        }
-
-        private void RemoveSuperTriangleTriangles(int3 superIndices, NativeList<int> levelIndices)
-        {
-            int globalOffset = superIndices.x;
-
-            for (int i = Triangles.Length - 1; i >= 0; i--)
-            {
-                DelaunayTriangle triangle = Triangles[i];
-
-                // если любой индекс принадлежит супер-треугольнику — удаляем
-                if (triangle.A >= globalOffset || triangle.B >= globalOffset || triangle.C >= globalOffset)
-                {
-                    Triangles.RemoveAtSwapBack(i);
-                    continue;
-                }
-
-                // переходим от локальных индексов back -> глобальные (из levelIndices)
-                triangle.A = levelIndices[triangle.A];
-                triangle.B = levelIndices[triangle.B];
-                triangle.C = levelIndices[triangle.C];
-                Triangles[i] = triangle;
-            }
+            edgeMap.Dispose();
         }
     }
 }

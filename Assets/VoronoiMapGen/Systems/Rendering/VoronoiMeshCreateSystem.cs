@@ -11,10 +11,6 @@ using VoronoiMapGen.Components;
 
 namespace VoronoiMapGen.Systems
 {
-    /// <summary>
-    /// Первый проход рендера: создаёт по entity уникальный Mesh через MeshData,
-    /// вешает RenderMeshArray+MaterialMeshInfo и индивидуальный цвет URP (белый по умолчанию).
-    /// </summary>
     [WorldSystemFilter(WorldSystemFilterFlags.Presentation)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     public partial struct VoronoiMeshCreateSystem : ISystem
@@ -31,8 +27,7 @@ namespace VoronoiMapGen.Systems
         public void OnUpdate(ref SystemState state)
         {
             if (!SystemAPI.HasSingleton<MapGeneratedTag>()) return;
-            // if (SystemAPI.HasSingleton<VoronoiMeshGeneratedTag>()) return;
-
+            
             var query = SystemAPI.QueryBuilder()
                 .WithAll<VoronoiCell, CellPolygonVertex, CellTriIndex>()
                 .WithNone<VoronoiCellMeshTag>()
@@ -55,28 +50,30 @@ namespace VoronoiMapGen.Systems
             {
                 var e = entities[i];
                 var verts = state.EntityManager.GetBuffer<CellPolygonVertex>(e);
-                var triPairs = state.EntityManager.GetBuffer<CellTriIndex>(e);
+                var triIndices = state.EntityManager.GetBuffer<CellTriIndex>(e);
+
+                // Проверяем, что у нас достаточно вершин
+                if (verts.Length < 3 || triIndices.Length < 3)
+                    continue;
 
                 var md = mda[i];
                 md.SetVertexBufferParams(verts.Length,
                     new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
-                md.SetIndexBufferParams(triPairs.Length * 3 / 2, IndexFormat.UInt32);
+                md.SetIndexBufferParams(triIndices.Length, IndexFormat.UInt32);
 
                 var vb = md.GetVertexData<Vector3>();
                 for (int v = 0; v < verts.Length; v++)
                     vb[v] = new Vector3(verts[v].Value.x, 0f, verts[v].Value.y);
 
                 var ib = md.GetIndexData<int>();
-                int idx = 0;
-                for (int t = 0; t < triPairs.Length; t += 2)
+                // Используем индексы как есть - они должны быть уже правильными
+                for (int idx = 0; idx < triIndices.Length; idx++)
                 {
-                    ib[idx++] = 0;
-                    ib[idx++] = triPairs[t + 0].Value;
-                    ib[idx++] = triPairs[t + 1].Value;
+                    ib[idx] = triIndices[idx].Value;
                 }
 
                 md.subMeshCount = 1;
-                md.SetSubMesh(0, new SubMeshDescriptor(0, idx) { topology = MeshTopology.Triangles },
+                md.SetSubMesh(0, new SubMeshDescriptor(0, triIndices.Length) { topology = MeshTopology.Triangles },
                               MeshUpdateFlags.DontRecalculateBounds);
 
                 meshes[i] = new UnityEngine.Mesh { indexFormat = IndexFormat.UInt32 };
@@ -91,6 +88,7 @@ namespace VoronoiMapGen.Systems
             for (int i = 0; i < entities.Length; i++)
             {
                 var e = entities[i];
+                if (!state.EntityManager.Exists(e)) continue;
 
                 // позиция: local override либо позиция сайта
                 float3 pos;

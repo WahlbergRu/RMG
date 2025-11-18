@@ -47,8 +47,6 @@ namespace VoronoiMapGen.Systems
                 DelaunayTriangulationJob delaunayJob = new DelaunayTriangulationJob
                 {
                     Sites = sites,
-                    SiteMetadata = siteMetadata, // <<< ИСПОЛЬЗУЕМ siteMetadata
-                    Level = level,
                     Triangles = triangles,
                     Edges = edges
                 };
@@ -65,8 +63,6 @@ namespace VoronoiMapGen.Systems
                 {
                     Triangles = triangles.AsArray(),
                     Sites = sites,
-                    SiteMetadata = siteMetadata, // <<< ИСПОЛЬЗУЕМ siteMetadata
-                    Level = level,
                     Cells = voronoiCells,
                     Edges = voronoiEdges
                 };

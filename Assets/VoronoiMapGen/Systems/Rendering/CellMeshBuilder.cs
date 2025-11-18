@@ -23,7 +23,7 @@ namespace VoronoiMapGen.Rendering
             using var entities = query.ToEntityArray(Allocator.Temp);
             if (entities.Length == 0) return;
 
-            var meshes   = new List<UnityEngine.Mesh>();
+            var meshes = new List<UnityEngine.Mesh>();
             var cellList = new List<Entity>();
 
             foreach (var entity in entities)
@@ -31,7 +31,7 @@ namespace VoronoiMapGen.Rendering
                 if (!em.Exists(entity)) continue;
 
                 var verts = em.GetBuffer<CellPolygonVertex>(entity);
-                var tris  = em.GetBuffer<CellTriIndex>(entity);
+                var tris = em.GetBuffer<CellTriIndex>(entity);
 
                 if (verts.Length < 3 || tris.Length < 3) continue;
 
@@ -51,25 +51,26 @@ namespace VoronoiMapGen.Rendering
         private static UnityEngine.Mesh CreateMeshFromCellLocal(EntityManager em, Entity entity,
             DynamicBuffer<CellPolygonVertex> verts, DynamicBuffer<CellTriIndex> tris)
         {
-            var cell = em.GetComponentData<VoronoiCell>(entity);
-            var c = cell.Centroid;
-
             var mesh = new UnityEngine.Mesh
             {
                 name = $"CellMesh_{entity.Index}",
                 indexFormat = IndexFormat.UInt32
             };
 
+            // Преобразуем вершины
             var vArray = new Vector3[verts.Length];
             for (int i = 0; i < verts.Length; i++)
             {
                 float3 v = verts[i].Value;
-                vArray[i] = new Vector3(v.x - c.x, v.y, v.z - c.y);
+                vArray[i] = new Vector3(v.x, v.y, v.z);
             }
 
+            // Используем индексы как есть
             var tArray = new int[tris.Length];
             for (int i = 0; i < tris.Length; i++)
+            {
                 tArray[i] = tris[i].Value;
+            }
 
             mesh.SetVertices(vArray);
             mesh.SetTriangles(tArray, 0);
@@ -96,7 +97,7 @@ namespace VoronoiMapGen.Rendering
                 var biome = em.GetComponentData<CellBiome>(entity);
                 em.AddComponentData(entity, new URPMaterialPropertyBaseColor { Value = BiomeColors.Get(biome.Type) });
             }
-
+            
             em.AddComponentData(entity, LocalTransform.FromPosition(pos));
             em.AddComponent<VoronoiCellMeshTag>(entity);
         }
