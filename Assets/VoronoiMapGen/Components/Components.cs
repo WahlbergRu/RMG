@@ -54,6 +54,9 @@ namespace VoronoiMapGen.Components
         /// Пример: L5 (здания): 0.7 (высокая вариативность)
         /// </summary>
         public float ValueScale;
+        
+        
+        public int RelaxationIterations; 
     }
 
     /// <summary>
@@ -184,6 +187,8 @@ namespace VoronoiMapGen.Components
         /// Копия из LevelSettings для быстрого доступа.
         /// </summary>
         public float RenderThreshold; // Порог отображения
+        
+        
     }
 
     /// <summary>

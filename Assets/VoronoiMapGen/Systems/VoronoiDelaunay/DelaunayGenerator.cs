@@ -26,8 +26,8 @@ namespace VoronoiMapGen.Systems
             DelaunayTriangulationJob job = new DelaunayTriangulationJob
             {
                 Sites = sites,
-                SiteMetadata = siteMetadata,
-                Level = level,
+                // SiteMetadata = siteMetadata,
+                // Level = level,
                 Triangles = triangles,
                 Edges = edges
             };

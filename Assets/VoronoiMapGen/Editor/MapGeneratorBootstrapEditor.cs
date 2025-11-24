@@ -1,13 +1,24 @@
 ﻿using UnityEditor;
 using UnityEngine;
 using VoronoiMapGen.Bootstrap;
-using VoronoiMapGen.Components;
 
 [CustomEditor(typeof(MapGeneratorBootstrap))]
 public class MapGeneratorBootstrapEditor : Editor
 {
-    private string[] _levelNames = System.Enum.GetNames(typeof(DetailLevel));
+    // Properties
+    private SerializedProperty seedProp;
+    private SerializedProperty mapSizeProp;
+    private SerializedProperty levelConfigsProp;
+    
+    // Rendering
+    private SerializedProperty edgeWidthProp;
+    private SerializedProperty roadWidthProp;
+    private SerializedProperty roadColorProp;
+    private SerializedProperty borderColorProp;
+    private SerializedProperty drawRoadsProp;
+    private SerializedProperty drawBordersProp;
 
+    // Biome Colors
     private SerializedProperty oceanColorProp;
     private SerializedProperty coastColorProp;
     private SerializedProperty iceColorProp;
@@ -16,10 +27,20 @@ public class MapGeneratorBootstrapEditor : Editor
     private SerializedProperty forestColorProp;
     private SerializedProperty mountainColorProp;
     private SerializedProperty snowColorProp;
-    private SerializedProperty levelConfigsProp;
 
     private void OnEnable()
     {
+        seedProp = serializedObject.FindProperty("Seed");
+        mapSizeProp = serializedObject.FindProperty("MapSize");
+        levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
+
+        edgeWidthProp = serializedObject.FindProperty("EdgeWidth");
+        roadWidthProp = serializedObject.FindProperty("RoadWidth");
+        roadColorProp = serializedObject.FindProperty("RoadColor");
+        borderColorProp = serializedObject.FindProperty("BorderColor");
+        drawRoadsProp = serializedObject.FindProperty("DrawRoads");
+        drawBordersProp = serializedObject.FindProperty("DrawBorders");
+
         oceanColorProp = serializedObject.FindProperty("oceanColor");
         coastColorProp = serializedObject.FindProperty("coastColor");
         iceColorProp = serializedObject.FindProperty("iceColor");
@@ -28,72 +49,60 @@ public class MapGeneratorBootstrapEditor : Editor
         forestColorProp = serializedObject.FindProperty("forestColor");
         mountainColorProp = serializedObject.FindProperty("mountainColor");
         snowColorProp = serializedObject.FindProperty("snowColor");
-        levelConfigsProp = serializedObject.FindProperty("LevelConfigs"); 
     }
 
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
 
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("Seed"));
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("MapSize"));
-
+        // --- General Settings ---
+        EditorGUILayout.LabelField("General Settings", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(seedProp);
+        EditorGUILayout.PropertyField(mapSizeProp);
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Multi-Level Settings", EditorStyles.boldLabel);
 
-        SerializedProperty levelsCountProp = serializedObject.FindProperty("LevelsCount");
-        int oldLevelsCount = levelsCountProp.intValue;
-
-        EditorGUILayout.PropertyField(levelsCountProp);
-        int newLevelsCount = levelsCountProp.intValue;
-
-        newLevelsCount = Mathf.Clamp(newLevelsCount, 1, 7);
-        if (newLevelsCount != levelsCountProp.intValue)
-        {
-            levelsCountProp.intValue = newLevelsCount;
-            EditorUtility.SetDirty(target);
-        }
-
-        if (levelConfigsProp != null)
-        {
-            EditorGUILayout.PropertyField(levelConfigsProp, true);
-        }
-        else
-        {
-            EditorGUILayout.HelpBox("LevelConfigs property not found.", MessageType.Error);
-        }
-
+        // --- Level Configurations ---
+        // Отрисовываем массив. Unity сама предоставит поле "Size" и элементы.
+        // Заголовок берется из атрибута [Header] или названия переменной,
+        // но так как мы рисуем PropertyField для всего массива, он будет выглядеть стандартно.
+        EditorGUILayout.LabelField($"Multi-Level Settings (Total: {levelConfigsProp.arraySize})", EditorStyles.boldLabel);
+        
+        // true означает, что мы рисуем и дочерние элементы (раскрываем массив)
+        EditorGUILayout.PropertyField(levelConfigsProp, new GUIContent("Levels Configuration"), true); 
+        
         EditorGUILayout.Space();
+
+        // --- Rendering Settings ---
         EditorGUILayout.LabelField("Rendering Settings", EditorStyles.boldLabel);
-
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("EdgeWidth"));
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("RoadWidth"));
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("RoadColor"));
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("BorderColor"));
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("DrawRoads"));
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("DrawBorders"));
-
+        EditorGUILayout.PropertyField(edgeWidthProp);
+        EditorGUILayout.PropertyField(roadWidthProp);
+        EditorGUILayout.PropertyField(roadColorProp);
+        EditorGUILayout.PropertyField(borderColorProp);
+        EditorGUILayout.PropertyField(drawRoadsProp);
+        EditorGUILayout.PropertyField(drawBordersProp);
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Biome Colors", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("These colors are defined in the MapGeneratorBootstrap component and stored in MapSettings.", MessageType.Info);
 
-        EditorGUILayout.PropertyField(oceanColorProp);
-        EditorGUILayout.PropertyField(coastColorProp);
-        EditorGUILayout.PropertyField(iceColorProp);
-        EditorGUILayout.PropertyField(desertColorProp);
-        EditorGUILayout.PropertyField(grasslandColorProp);
-        EditorGUILayout.PropertyField(forestColorProp);
-        EditorGUILayout.PropertyField(mountainColorProp);
-        EditorGUILayout.PropertyField(snowColorProp);
+        // --- Biome Colors ---
+        EditorGUILayout.LabelField("Biome Colors", EditorStyles.boldLabel);
+        
+        // Можно свернуть цвета в Foldout, чтобы не занимали много места
+        bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", true);
+        showColors = EditorGUILayout.Foldout(showColors, "Biome Palette");
+        if (showColors)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(oceanColorProp);
+            EditorGUILayout.PropertyField(coastColorProp);
+            EditorGUILayout.PropertyField(iceColorProp);
+            EditorGUILayout.PropertyField(desertColorProp);
+            EditorGUILayout.PropertyField(grasslandColorProp);
+            EditorGUILayout.PropertyField(forestColorProp);
+            EditorGUILayout.PropertyField(mountainColorProp);
+            EditorGUILayout.PropertyField(snowColorProp);
+            EditorGUI.indentLevel--;
+        }
+        EditorPrefs.SetBool("MapGen_ShowColors", showColors);
 
         serializedObject.ApplyModifiedProperties();
-    }
-
-    private string GetLevelName(int levelIndex)
-    {
-        if (levelIndex < 0 || levelIndex >= _levelNames.Length)
-            return $"Custom Level {levelIndex}";
-
-        return _levelNames[levelIndex];
     }
 }
