@@ -39,18 +39,17 @@ namespace VoronoiMapGen.Jobs
             }
         }
 
-        // --- L0 GENERATION (Как и было) ---
+        // --- L0 GENERATION ---
         private void GenerateGlobalSites(int level, LevelSettings settings)
         {
             int currentIndex = 0;
-            int totalSites = Sites.Length; // Size calculated in SiteGenerator
-
+            
             // 1. GHOST WALL
             float wallDistance = math.min(MapSize.x, MapSize.y) * 0.5f; 
             int ghostsPerSide = (int)(math.sqrt(settings.SiteCount) * 0.8f); 
             ghostsPerSide = math.clamp(ghostsPerSide, 5, 30);
 
-            // Corners
+            // Corners & Walls logic (Standard)
             AddSite(currentIndex++, new float2(-wallDistance, -wallDistance), level, settings, true);
             AddSite(currentIndex++, new float2(MapSize.x + wallDistance, -wallDistance), level, settings, true);
             AddSite(currentIndex++, new float2(-wallDistance, MapSize.y + wallDistance), level, settings, true);
@@ -64,23 +63,22 @@ namespace VoronoiMapGen.Jobs
             AddSite(currentIndex++, new float2(MapSize.x + wallDistance, MapSize.y), level, settings, true);
             AddSite(currentIndex++, new float2(MapSize.x, MapSize.y + wallDistance), level, settings, true);
 
-            // Sides
-            int ghostLimit = currentIndex + (ghostsPerSide * 4);
-            if (ghostLimit < totalSites)
+            for (int i = 0; i < ghostsPerSide; i++)
             {
-                for (int i = 0; i < ghostsPerSide; i++)
-                {
-                    float t = (float)i / (ghostsPerSide - 1);
-                    AddSite(currentIndex++, new float2(math.lerp(0, MapSize.x, t), -wallDistance), level, settings, true);
-                    AddSite(currentIndex++, new float2(math.lerp(0, MapSize.x, t), MapSize.y + wallDistance), level, settings, true);
-                    AddSite(currentIndex++, new float2(-wallDistance, math.lerp(0, MapSize.y, t)), level, settings, true);
-                    AddSite(currentIndex++, new float2(MapSize.x + wallDistance, math.lerp(0, MapSize.y, t)), level, settings, true);
-                }
+                float t = (float)i / (ghostsPerSide - 1);
+                if (currentIndex < Sites.Length) AddSite(currentIndex++, new float2(math.lerp(0, MapSize.x, t), -wallDistance), level, settings, true);
+                if (currentIndex < Sites.Length) AddSite(currentIndex++, new float2(math.lerp(0, MapSize.x, t), MapSize.y + wallDistance), level, settings, true);
+                if (currentIndex < Sites.Length) AddSite(currentIndex++, new float2(-wallDistance, math.lerp(0, MapSize.y, t)), level, settings, true);
+                if (currentIndex < Sites.Length) AddSite(currentIndex++, new float2(MapSize.x + wallDistance, math.lerp(0, MapSize.y, t)), level, settings, true);
             }
 
             // 2. INTERNAL FILL
+            int maxSites = currentIndex + settings.SiteCount;
+            if (maxSites > Sites.Length) maxSites = Sites.Length;
+
             float padding = math.min(MapSize.x, MapSize.y) * 0.02f;
-            for (int i = currentIndex; i < totalSites; i++)
+            
+            for (int i = currentIndex; i < maxSites; i++)
             {
                 uint randomSeed = (uint)(BaseSeed + i * 92834);
                 Random random = new Random(randomSeed);
@@ -90,22 +88,38 @@ namespace VoronoiMapGen.Jobs
                 );
                 AddSite(i, position, level, settings, false);
             }
+            
+            // Fill remaining
+            for (int i = maxSites; i < Sites.Length; i++)
+            {
+                 Sites[i] = new float2(-10000, -10000); 
+                 SiteMetadata[i] = new VoronoiSite { Index = i, Value = -1 };
+            }
         }
 
-        // --- L1+ GENERATION (Исправлено) ---
+        // --- L1+ GENERATION ---
         private void GenerateChildSites(int level, LevelSettings settings)
         {
             int currentIndex = 0;
             
-            // 1. КОПИРУЕМ ПРИЗРАКОВ ОТ РОДИТЕЛЯ
-            // Это критически важно, чтобы сохранить квадратную форму карты
+            // 1. Считаем РЕАЛЬНЫХ родителей для правильного радиуса
             int realParentCount = 0;
-            
+            for (int i = 0; i < ParentSiteMetadata.Length; i++)
+            {
+                if (ParentSiteMetadata[i].Value > -0.5f) realParentCount++;
+            }
+            if (realParentCount < 1) realParentCount = 1;
+
+            // 2. Рассчитываем средний радиус родителя (только по площади карты)
+            float mapArea = MapSize.x * MapSize.y;
+            float avgParentArea = mapArea / realParentCount; 
+            float avgParentRadius = math.sqrt(avgParentArea / math.PI);
+
+            // 3. КОПИРУЕМ ПРИЗРАКОВ
             for (int i = 0; i < ParentSiteMetadata.Length; i++)
             {
                 var pMeta = ParentSiteMetadata[i];
-                
-                if (pMeta.Value < -0.5f) // Это призрак
+                if (pMeta.Value < -0.5f) 
                 {
                     if (currentIndex < Sites.Length)
                     {
@@ -116,106 +130,83 @@ namespace VoronoiMapGen.Jobs
                             Index = currentIndex,
                             Level = level,
                             ParentIndex = i,
-                            Value = -1.0f // Остается призраком
+                            Value = -1.0f 
                         };
                         currentIndex++;
                     }
                 }
-                else
-                {
-                    realParentCount++;
-                }
             }
 
-            // 2. ГЕНЕРИРУЕМ ДЕТЕЙ ВНУТРИ РЕАЛЬНЫХ ЯЧЕЕК
-            // Мы делим запрошенное количество точек (например 50) на количество реальных родителей.
-            if (realParentCount == 0) realParentCount = 1;
-            
-            int childrenPerParent = settings.SiteCount / realParentCount;
-            // Гарантируем хотя бы 1 ребенка, если настройки кривые, но не меньше 0
-            if (childrenPerParent < 1 && settings.SiteCount > 0) childrenPerParent = 1;
-
-            int sitesGenerated = currentIndex; // Начинаем после призраков
+            // 4. ГЕНЕРИРУЕМ ДЕТЕЙ
+            int childrenPerParent = settings.SiteCount; 
             
             for (int pIdx = 0; pIdx < ParentCells.Length; pIdx++)
             {
-                // Пропускаем призраков
                 if (ParentSiteMetadata[pIdx].Value < -0.5f) continue;
-                
-                // Пропускаем если ячейка не того уровня (на всякий случай)
                 if (ParentCells[pIdx].Level != ParentLevel) continue;
 
-                // Генерируем N детей для этого родителя
-                for (int c = 0; c < childrenPerParent && sitesGenerated < Sites.Length; c++)
+                float2 parentCentroid = ParentCells[pIdx].Centroid;
+                
+                for (int c = 0; c < childrenPerParent; c++)
                 {
-                    float2 parentPos = ParentSites[pIdx];
-                    float2 childPos = GeneratePointInCell(parentPos, pIdx, c, settings);
-                    
-                    // Кламп обязателен
+                    if (currentIndex >= Sites.Length) break;
+
+                    float2 childPos = GeneratePointInCell(parentCentroid, pIdx, c, settings, avgParentRadius);
                     childPos = math.clamp(childPos, new float2(0.1f), MapSize - new float2(0.1f));
 
-                    // Наследуем Value от родителя + шум
                     float parentVal = ParentSiteMetadata[pIdx].Value;
-                    float childVal = parentVal * 0.8f + SimplexNoise(childPos * 0.05f, BaseSeed + sitesGenerated) * 0.2f;
+                    float childVal = parentVal * 0.9f + SimplexNoise(childPos * 0.1f, BaseSeed + currentIndex) * 0.1f;
 
-                    Sites[sitesGenerated] = childPos;
-                    SiteMetadata[sitesGenerated] = new VoronoiSite
+                    Sites[currentIndex] = childPos;
+                    SiteMetadata[currentIndex] = new VoronoiSite
                     {
                         Position = childPos,
-                        Index = sitesGenerated,
+                        Index = currentIndex,
                         Level = level,
                         ParentIndex = pIdx,
                         Value = math.saturate(childVal)
                     };
-                    sitesGenerated++;
+                    currentIndex++;
                 }
             }
-
-            // 3. ДОБИВКА (если из-за округления осталось место)
-            while (sitesGenerated < Sites.Length)
+            
+            for (int i = currentIndex; i < Sites.Length; i++)
             {
-                uint seed = (uint)(BaseSeed + level * 555 + sitesGenerated);
-                Random rnd = new Random(seed);
-                float2 pos = new float2(rnd.NextFloat(0, MapSize.x), rnd.NextFloat(0, MapSize.y));
-                
-                Sites[sitesGenerated] = pos;
-                SiteMetadata[sitesGenerated] = new VoronoiSite
-                {
-                    Position = pos,
-                    Index = sitesGenerated,
-                    Level = level,
-                    ParentIndex = -1,
-                    Value = 0.5f
-                };
-                sitesGenerated++;
+                Sites[i] = new float2(-10000, -10000);
+                SiteMetadata[i] = new VoronoiSite { Index = i, Value = -1 };
             }
         }
 
-        // --- Helpers ---
         private void AddSite(int index, float2 position, int level, LevelSettings settings, bool isGhost)
         {
             if (index >= Sites.Length) return;
             float value = isGhost ? 0 : (settings.ValueBias + SimplexNoise(position * 0.001f, BaseSeed) * settings.ValueScale);
             Sites[index] = position;
-            SiteMetadata[index] = new VoronoiSite { Position = position, Index = index, Level = level, ParentIndex = -1, Value = isGhost ? -1.0f : math.saturate(value) };
+            SiteMetadata[index] = new VoronoiSite { 
+                Position = position, 
+                Index = index, 
+                Level = level, 
+                ParentIndex = -1, 
+                Value = isGhost ? -1.0f : math.saturate(value) 
+            };
         }
 
-        private float2 GeneratePointInCell(float2 parentPosition, int parentIndex, int index, LevelSettings settings)
+        private float2 GeneratePointInCell(float2 parentPosition, int parentIndex, int index, LevelSettings settings, float baseRadius)
         {
-             uint randomSeed = (uint)(BaseSeed ^ (parentIndex * 397) ^ index);
-             if (randomSeed == 0) randomSeed = 1;
+             uint randomSeed = (uint)(BaseSeed ^ (parentIndex * 73856093) ^ (index * 19349663));
              Random random = new Random(randomSeed);
              
-             // Радиус разброса зависит от ScaleFactor (уменьшаем его для дочерних)
-             float mapScale = math.min(MapSize.x, MapSize.y);
-             float scale = mapScale * settings.ScaleFactor * 0.04f; 
+             // Исправленный разброс:
+             // baseRadius теперь правильный (большой).
+             // Умножаем на 1.5, чтобы точки слегка заходили на соседние ячейки (создавая перекрытие).
+             float radius = baseRadius * settings.ScaleFactor * 1.5f; 
              
              float angle = random.NextFloat(0, math.PI * 2);
-             float dist = math.sqrt(random.NextFloat(0, 1)) * scale;
+             float dist = math.sqrt(random.NextFloat(0, 1)) * radius; 
+             
              return parentPosition + new float2(math.cos(angle), math.sin(angle)) * dist;
         }
 
-        
         private float SimplexNoise(float2 pos, int seed) => noise.snoise(pos + new float2(seed));
     }
 }

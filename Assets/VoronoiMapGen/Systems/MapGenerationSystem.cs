@@ -133,12 +133,11 @@ namespace VoronoiMapGen.Systems
         /// Полный цикл генерации одного уровня (Sites -> Delaunay -> Voronoi -> Entities -> Storage)
         /// Выполняется синхронно за один кадр, чтобы не усложнять логику владения памятью.
         /// </summary>
-private void ProcessSingleLevel(int levelIndex)
+        private void ProcessSingleLevel(int levelIndex)
         {
             m_LevelSW.Restart();
             Debug.Log($"--- Processing Level {levelIndex} ---");
 
-            // 1. Подготовка и Генерация Сайтов
             GetParentData(levelIndex, out var parentCells, out var parentSites, out var parentMeta);
 
             (var sites, var siteMeta) = SiteGenerator.Generate(
@@ -146,12 +145,9 @@ private void ProcessSingleLevel(int levelIndex)
                 levelIndex, parentCells, parentSites, parentMeta
             );
 
-            // Получаем кол-во итераций из настроек
             int iterations = m_LevelSettings[levelIndex].RelaxationIterations;
-            // Гарантируем хотя бы 1 проход построения (даже если итераций 0)
             int totalPasses = math.max(1, iterations + 1);
 
-            // Временные списки (будем переиспользовать или создавать заново)
             NativeList<DelaunayTriangle> triangles = default;
             NativeList<int3> edges = default;
             NativeList<VoronoiCell> voronoiCells = default;
@@ -161,13 +157,11 @@ private void ProcessSingleLevel(int levelIndex)
             {
                 bool isLastPass = (pass == totalPasses - 1);
                 
-                // Очистка от прошлого прохода
                 if (triangles.IsCreated) triangles.Dispose();
                 if (edges.IsCreated) edges.Dispose();
                 if (voronoiCells.IsCreated) voronoiCells.Dispose();
                 if (voronoiEdges.IsCreated) voronoiEdges.Dispose();
 
-                // A. Триангуляция
                 triangles = new NativeList<DelaunayTriangle>(Allocator.TempJob);
                 edges = new NativeList<int3>(Allocator.TempJob);
 
@@ -180,7 +174,6 @@ private void ProcessSingleLevel(int levelIndex)
                     Edges = edges
                 }.Schedule(default).Complete();
 
-                // B. Вороной
                 voronoiCells = new NativeList<VoronoiCell>(Allocator.TempJob);
                 voronoiEdges = new NativeList<VoronoiEdge>(Allocator.TempJob);
 
@@ -193,7 +186,6 @@ private void ProcessSingleLevel(int levelIndex)
                     Edges = voronoiEdges
                 }.Schedule(default).Complete();
 
-                // C. Если это НЕ последний проход -> Релаксация Ллойда
                 if (!isLastPass)
                 {
                     new LloydRelaxationJob
@@ -201,33 +193,30 @@ private void ProcessSingleLevel(int levelIndex)
                         Cells = voronoiCells.AsArray(),
                         SiteMetadata = siteMeta,
                         MapSize = m_Settings.MapSize,
-                        Sites = sites // Обновляет позиции прямо в массиве sites
+                        Sites = sites 
                     }.Schedule(default).Complete();
-                    
-                    // Сайты сдвинулись, идем на следующий круг перестраивать сетку
                 }
             }
 
-            // Сохраняем финальные сайты (они могли сдвинуться)
             m_LevelSites[levelIndex] = sites;
             m_LevelSiteMetadata[levelIndex] = siteMeta;
 
-            // D. Создание сущностей (только для финальной сетки)
+            // === ОБНОВЛЕННЫЙ ВЫЗОВ ===
             EntityCreationPipeline.CreateEntities(
                 EntityManager,
                 levelIndex,
                 m_LevelSettings[levelIndex],
+                m_Settings.MapSize, // <--- Передаем размер карты для обрезки!
                 sites,
                 siteMeta,
                 voronoiCells,
                 voronoiEdges
             );
+            // ==========================
 
-            // E. Сохранение ячеек
             m_LevelCells[levelIndex] = new NativeArray<VoronoiCell>(voronoiCells.Length, Allocator.Persistent);
             NativeArray<VoronoiCell>.Copy(voronoiCells.AsArray(), m_LevelCells[levelIndex]);
 
-            // F. Очистка
             triangles.Dispose();
             edges.Dispose();
             voronoiCells.Dispose();
@@ -238,9 +227,9 @@ private void ProcessSingleLevel(int levelIndex)
             if (parentMeta.Length == 0 && levelIndex == 0) parentMeta.Dispose();
 
             m_LevelSW.Stop();
-            Debug.Log($"[Level {levelIndex}] Complete with {iterations} relaxation steps. Sites: {sites.Length}");
+            Debug.Log($"[Level {levelIndex}] Complete. Sites: {sites.Length}");
         }
-
+        
         private void GetParentData(int currentLevel, out NativeArray<VoronoiCell> pCells, out NativeArray<float2> pSites, out NativeArray<VoronoiSite> pMeta)
         {
             // Для уровня 0 родителей нет

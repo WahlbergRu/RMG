@@ -25,27 +25,36 @@ namespace VoronoiMapGen.Systems
             // === РАСЧЕТ РАЗМЕРА МАССИВА ===
             if (level == 0)
             {
-                // L0: Считаем призраков по формуле
+                // L0: Все как раньше (SiteCount = общее количество)
                 int ghostsPerSide = (int)(math.sqrt(levelSettings.SiteCount) * 0.8f);
                 ghostsPerSide = math.clamp(ghostsPerSide, 5, 30);
-                int ghostCount = 12 + (4 * ghostsPerSide); // Углы + стены
+                int ghostCount = 12 + (4 * ghostsPerSide); 
                 totalAllocation = levelSettings.SiteCount + ghostCount;
             }
             else
             {
-                // L1+: Считаем призраков у родителя, чтобы скопировать их
+                // L1+: ЛОГИКА ИЗМЕНЕНА
+                // Теперь SiteCount - это "Количество детей на ОДНОГО родителя"
+                
                 int parentGhosts = 0;
+                int realParents = 0;
+
                 if (parentSiteMetadata.IsCreated)
                 {
+                    // Считаем на Main Thread (это быстро для <10k элементов)
                     for (int i = 0; i < parentSiteMetadata.Length; i++)
                     {
-                        // Если Value < -0.5f, это призрак
                         if (parentSiteMetadata[i].Value < -0.5f) parentGhosts++;
+                        else realParents++;
                     }
                 }
                 
-                // Итого = Призраки родителя + Запрошенные новые точки
-                totalAllocation = parentGhosts + levelSettings.SiteCount;
+                // Итого = (Копируем призраков) + (Реальные родители * Кол-во детей)
+                // Если SiteCount = 50, а родителей 10, выделим память под 500 точек.
+                int childrenCount = realParents * levelSettings.SiteCount;
+                
+                // Добавляем небольшой запас на случай ошибок округления или добивки
+                totalAllocation = parentGhosts + childrenCount + 64; 
             }
 
             // Создаем массивы

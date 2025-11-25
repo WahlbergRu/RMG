@@ -42,7 +42,7 @@ namespace VoronoiMapGen.Systems
                     continue;
 
                 ProcessCell(entity, cell, edges, mapSettings, ecb, ref state);
-                ecb.AddComponent<VoronoiMeshGeneratedTag>(entity);
+                ecb.AddComponent<VoronoiCellMeshTag>(entity);
             }
             
             var builtEntity = state.EntityManager.CreateEntity();

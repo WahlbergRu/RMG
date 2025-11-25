@@ -1,164 +1,124 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using Unity.Collections;
+﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Jobs;
-using Debug = UnityEngine.Debug;
 
 namespace VoronoiMapGen.Systems
 {
     public static class LevelGenerationPipeline
     {
-        // <<< ДОБАВЛЕНО: Поле для хранения siteMetadata каждого уровня >>>
-        private static NativeArray<VoronoiSite>[] s_LevelSiteMetadata;
-
-        public static void GenerateLevels(
-            EntityManager em,
+        public static void Generate(
+            EntityManager entityManager,
+            int levelIndex,
             MapSettings mapSettings,
-            NativeArray<LevelSettings> levels)
+            LevelSettings levelSettings,
+            NativeArray<VoronoiCell> parentCells,
+            NativeArray<float2> parentSites,
+            NativeArray<VoronoiSite> parentMeta,
+            out NativeArray<float2> resultSites,
+            out NativeArray<VoronoiSite> resultMeta,
+            out NativeArray<VoronoiCell> resultCells)
         {
-            NativeArray<VoronoiCell> parentCells = default;
-            NativeArray<float2> parentSites = default;
-            NativeArray<VoronoiSite> parentSiteMetadata = default; // <<< НОВОЕ
+            // 1. Генерация точек (Sites)
+            (var sites, var siteMeta) = SiteGenerator.Generate(
+                mapSettings, 
+                default, // Тут можно передать полный массив настроек если нужно, или заглушку
+                levelSettings,
+                levelIndex, 
+                parentCells, 
+                parentSites, 
+                parentMeta
+            );
 
-            // <<< ДОБАВЛЕНО: Инициализация s_LevelSiteMetadata >>>
-            s_LevelSiteMetadata = new NativeArray<VoronoiSite>[levels.Length];
+            // 2. Цикл Релаксации (Lloyd)
+            int iterations = levelSettings.RelaxationIterations;
+            int totalPasses = math.max(1, iterations + 1);
 
-            for (int level = 0; level < levels.Length; level++)
+            NativeList<DelaunayTriangle> triangles = default;
+            NativeList<int3> delaunayEdges = default; // Временный список для джобы
+            NativeList<VoronoiCell> voronoiCells = default;
+            NativeList<VoronoiEdge> voronoiEdges = default;
+
+            for (int pass = 0; pass < totalPasses; pass++)
             {
-                LevelSettings levelSettings = levels[level];
-                Debug.Log($"[Level {level}] Generating level with SiteCount={levelSettings.SiteCount}");
+                bool isLastPass = (pass == totalPasses - 1);
+                
+                // Очистка памяти от предыдущего прохода
+                if (triangles.IsCreated) triangles.Dispose();
+                if (delaunayEdges.IsCreated) delaunayEdges.Dispose();
+                if (voronoiCells.IsCreated) voronoiCells.Dispose();
+                if (voronoiEdges.IsCreated) voronoiEdges.Dispose();
 
-                // === 1. Генерация сайтов ===
-                NativeArray<float2> sites;
-                NativeArray<VoronoiSite> siteMetadata; // <<< ИЗМЕНЕНО имя переменной >>>
-                (sites, siteMetadata) = SiteGenerator.Generate(mapSettings, levels, levelSettings, level, parentCells, parentSites, parentSiteMetadata); // <<< ПЕРЕДАЁМ parentSiteMetadata
-                Debug.Log($"[Level {level}] Sites generated: {sites.Length}");
+                // А. Триангуляция
+                triangles = new NativeList<DelaunayTriangle>(Allocator.TempJob);
+                delaunayEdges = new NativeList<int3>(Allocator.TempJob);
 
-                // === 2. Триангуляция Делоне ===
-                NativeList<DelaunayTriangle> triangles = new NativeList<DelaunayTriangle>(Allocator.TempJob);
-                NativeList<int3> edges = new NativeList<int3>(Allocator.TempJob);
-
-                DelaunayTriangulationJob delaunayJob = new DelaunayTriangulationJob
+                new DelaunayTriangulationJob
                 {
                     Sites = sites,
+                    SiteMetadata = siteMeta,
+                    Level = levelIndex,
                     Triangles = triangles,
-                    Edges = edges
-                };
+                    Edges = delaunayEdges
+                }.Schedule(default).Complete();
 
-                JobHandle delaunayHandle = delaunayJob.Schedule(default);
-                delaunayHandle.Complete();
-                Debug.Log($"[Level {level}] Triangles: {triangles.Length}, Edges: {edges.Length}");
+                // Б. Построение Вороного
+                voronoiCells = new NativeList<VoronoiCell>(Allocator.TempJob);
+                voronoiEdges = new NativeList<VoronoiEdge>(Allocator.TempJob);
 
-                // === 3. Построение диаграммы Вороного ===
-                NativeList<VoronoiCell> voronoiCells = new NativeList<VoronoiCell>(Allocator.TempJob);
-                NativeList<VoronoiEdge> voronoiEdges = new NativeList<VoronoiEdge>(Allocator.TempJob);
-
-                VoronoiConstructionJob voronoiJob = new VoronoiConstructionJob
+                new VoronoiConstructionJob
                 {
                     Triangles = triangles.AsArray(),
                     Sites = sites,
+                    Level = levelIndex,
                     Cells = voronoiCells,
                     Edges = voronoiEdges
-                };
+                }.Schedule(default).Complete();
 
-                JobHandle voronoiHandle = voronoiJob.Schedule(default);
-                voronoiHandle.Complete();
-                Debug.Log($"[Level {level}] Voronoi cells: {voronoiCells.Length}, edges: {voronoiEdges.Length}");
-                
-                // === 4. Создание ECS сущностей ===
-                EntityCreationPipeline.CreateEntities(
-                    em,
-                    level,
-                    levelSettings,
-                    sites,
-                    siteMetadata, // <<< ИСПОЛЬЗУЕМ siteMetadata
-                    voronoiCells,
-                    voronoiEdges);
-                Debug.Log($"[Level {level}] ECS entities created");
-
-                // === 5. Копируем данные для следующего уровня ===
-                if (parentCells.IsCreated)
+                // В. Релаксация (двигаем точки к центру ячеек)
+                if (!isLastPass)
                 {
-                    parentCells.Dispose();
+                    new LloydRelaxationJob
+                    {
+                        Cells = voronoiCells.AsArray(),
+                        SiteMetadata = siteMeta,
+                        MapSize = mapSettings.MapSize,
+                        Sites = sites 
+                    }.Schedule(default).Complete();
                 }
-                if (parentSites.IsCreated)
-                {
-                    parentSites.Dispose();
-                }
-                // <<< НОВОЕ: Освобождаем parentSiteMetadata >>>
-                if (parentSiteMetadata.IsCreated) // <<< НОВОЕ
-                {                                 // <<< НОВОЕ
-                    parentSiteMetadata.Dispose(); // <<< НОВОЕ
-                }                                 // <<< НОВОЕ
-
-                // --- ЗАПОЛНЯЕМ parentCells, parentSites И parentSiteMetadata ДЛЯ СЛЕДУЮЩЕГО УРОВНЯ ---
-                parentCells = new NativeArray<VoronoiCell>(voronoiCells.Length, Allocator.Temp);
-                for (int i = 0; i < voronoiCells.Length; i++)
-                {
-                    parentCells[i] = voronoiCells[i];
-                }
-
-                parentSites = new NativeArray<float2>(sites.Length, Allocator.Temp);
-                for (int i = 0; i < sites.Length; i++)
-                {
-                    parentSites[i] = sites[i]; // <<< Сохраняем позиции точек текущего уровня
-                }
-
-                // <<< НОВОЕ: Заполняем parentSiteMetadata для следующего уровня >>>
-                parentSiteMetadata = new NativeArray<VoronoiSite>(siteMetadata.Length, Allocator.Temp); // <<< НОВОЕ
-                for (int i = 0; i < siteMetadata.Length; i++)                                         // <<< НОВОЕ
-                {                                                                                     // <<< НОВОЕ
-                    parentSiteMetadata[i] = siteMetadata[i];                                          // <<< НОВОЕ
-                }                                                                                     // <<< НОВОЕ
-
-                // <<< НОВОЕ: Сохраняем siteMetadata в s_LevelSiteMetadata >>>
-                if (s_LevelSiteMetadata[level].IsCreated) // <<< НОВОЕ
-                {                                         // <<< НОВОЕ
-                    s_LevelSiteMetadata[level].Dispose(); // Освобождаем старый, если был (на всякий случай) // <<< НОВОЕ
-                }                                         // <<< НОВОЕ
-                s_LevelSiteMetadata[level] = siteMetadata; // <<< НОВОЕ
-
-                // === 6. Освобождение временных буферов ===
-                sites.Dispose();
-                siteMetadata.Dispose(); // <<< ОСВОБОЖДАЕМ siteMetadata
-                triangles.Dispose();
-                edges.Dispose();
-                voronoiEdges.Dispose();
-                voronoiCells.Dispose();
-
-                Debug.Log($"[Level {level}] Temporary buffers disposed");
             }
 
-            // <<< НОВОЕ: Освобождаем s_LevelSiteMetadata >>>
-            if (s_LevelSiteMetadata != null) // <<< НОВОЕ
-            {                                // <<< НОВОЕ
-                for (int i = 0; i < s_LevelSiteMetadata.Length; i++) // <<< НОВОЕ
-                {                                                     // <<< НОВОЕ
-                    if (s_LevelSiteMetadata[i].IsCreated)             // <<< НОВОЕ
-                        s_LevelSiteMetadata[i].Dispose();             // <<< НОВОЕ
-                }                                                     // <<< НОВОЕ
-                s_LevelSiteMetadata = null;                           // <<< НОВОЕ
-            }                                                         // <<< НОВОЕ
+            // 3. Создание сущностей (Entities)
+            // === ИСПРАВЛЕНИЕ ОШИБКИ CS7036 ===
+            // Добавлен аргумент mapSettings.MapSize для обрезки полигонов
+            EntityCreationPipeline.CreateEntities(
+                entityManager,
+                levelIndex,
+                levelSettings,
+                mapSettings.MapSize, // <--- ВОТ ЭТОГО НЕ ХВАТАЛО
+                sites,
+                siteMeta,
+                voronoiCells,
+                voronoiEdges
+            );
+            // ==================================
 
-            // Освобождаем parentCells, parentSites и parentSiteMetadata после завершения всех уровней
-            if (parentCells.IsCreated)
-            {
-                parentCells.Dispose();
-            }
-            if (parentSites.IsCreated)
-            {
-                parentSites.Dispose();
-            }
-            if (parentSiteMetadata.IsCreated) // <<< НОВОЕ
-            {                                 // <<< НОВОЕ
-                parentSiteMetadata.Dispose(); // <<< НОВОЕ
-            }                                 // <<< НОВОЕ
+            // 4. Подготовка результатов для возврата (чтобы сохранить для след. уровня)
+            resultSites = sites; // Передаем владение массивом наружу
+            resultMeta = siteMeta; // Передаем владение
+            
+            // Копируем ячейки в Persistent массив для возврата
+            resultCells = new NativeArray<VoronoiCell>(voronoiCells.Length, Allocator.Persistent);
+            NativeArray<VoronoiCell>.Copy(voronoiCells.AsArray(), resultCells);
+
+            // 5. Очистка временных данных
+            triangles.Dispose();
+            delaunayEdges.Dispose();
+            voronoiCells.Dispose();
+            voronoiEdges.Dispose();
         }
     }
 }

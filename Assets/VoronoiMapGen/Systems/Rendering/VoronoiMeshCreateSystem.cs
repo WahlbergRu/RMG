@@ -1,5 +1,4 @@
-﻿using Unity.Burst;
-using Unity.Collections;
+﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Entities.Graphics;
 using Unity.Mathematics;
@@ -16,126 +15,185 @@ namespace VoronoiMapGen.Systems
     public partial struct VoronoiMeshCreateSystem : ISystem
     {
         private static Material s_DefaultMaterial;
+        private const int BATCH_SIZE = 2000;
 
-        [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            s_DefaultMaterial ??= EnsureDefaultMaterial();
+            if (s_DefaultMaterial == null) s_DefaultMaterial = EnsureDefaultMaterial();
+            state.RequireForUpdate<MapGeneratedTag>();
         }
 
-        [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            if (!SystemAPI.HasSingleton<MapGeneratedTag>()) return;
-            
+            // 1. Запрос сущностей. ВАЖНО: Включаем VoronoiSite, чтобы читать позицию
             var query = SystemAPI.QueryBuilder()
-                .WithAll<VoronoiCell, CellPolygonVertex, CellTriIndex>()
+                .WithAll<VoronoiCell, VoronoiSite, CellPolygonVertex, CellTriIndex, DetailLevelData>()
                 .WithNone<VoronoiCellMeshTag>()
                 .Build();
 
-            using var entities = query.ToEntityArray(Allocator.Temp);
-            if (entities.Length == 0) return;
-
-            // siteIndex -> pos
-            var siteQ = SystemAPI.QueryBuilder().WithAll<VoronoiSite>().Build();
-            using var sites = siteQ.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
-            var sitePos = new NativeParallelHashMap<int, float2>(sites.Length, Allocator.Temp);
-            foreach (var s in sites) sitePos[s.Index] = s.Position;
-
-            // пакетно готовим MeshData
-            var mda = UnityEngine.Mesh.AllocateWritableMeshData(entities.Length);
-            var meshes = new UnityEngine.Mesh[entities.Length];
-
-            for (int i = 0; i < entities.Length; i++)
+            // 2. Логика завершения
+            if (query.IsEmpty)
             {
+                if (!SystemAPI.HasSingleton<VoronoiMeshGeneratedTag>())
+                {
+                    var tagEntity = state.EntityManager.CreateEntity();
+                    state.EntityManager.AddComponent<VoronoiMeshGeneratedTag>(tagEntity);
+                    Debug.Log("--- Visualization Complete. ---");
+                }
+                return;
+            }
+
+            using var entities = query.ToEntityArray(Allocator.Temp);
+            int countToProcess = math.min(entities.Length, BATCH_SIZE);
+
+            // Нам НЕ НУЖЕН sitePos HashMap. Мы будем брать позицию прямо из сущности.
+            // Это предотвращает баг со смещением уровней.
+
+            var mda = UnityEngine.Mesh.AllocateWritableMeshData(countToProcess);
+            var meshes = new UnityEngine.Mesh[countToProcess];
+
+            // --- ЦИКЛ 1: ГЕОМЕТРИЯ ---
+            for (int i = 0; i < countToProcess; i++)
+            {
+                meshes[i] = new UnityEngine.Mesh { indexFormat = IndexFormat.UInt32 };
+                meshes[i].name = $"CellMesh_{i}";
+
                 var e = entities[i];
                 var verts = state.EntityManager.GetBuffer<CellPolygonVertex>(e);
                 var triIndices = state.EntityManager.GetBuffer<CellTriIndex>(e);
-
-                // Проверяем, что у нас достаточно вершин
-                if (verts.Length < 3 || triIndices.Length < 3)
-                    continue;
-
                 var md = mda[i];
-                md.SetVertexBufferParams(verts.Length,
-                    new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
-                md.SetIndexBufferParams(triIndices.Length, IndexFormat.UInt32);
 
-                var vb = md.GetVertexData<Vector3>();
-                for (int v = 0; v < verts.Length; v++)
-                    vb[v] = new Vector3(verts[v].Value.x, 0f, verts[v].Value.y);
-
-                var ib = md.GetIndexData<int>();
-                // Используем индексы как есть - они должны быть уже правильными
-                for (int idx = 0; idx < triIndices.Length; idx++)
+                // Фикс ArgumentException (пустой меш)
+                if (verts.Length < 3 || triIndices.Length < 3)
                 {
-                    ib[idx] = triIndices[idx].Value;
+                    md.SetVertexBufferParams(0, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
+                    md.SetIndexBufferParams(0, IndexFormat.UInt32);
+                    md.subMeshCount = 1;
+                    md.SetSubMesh(0, new SubMeshDescriptor(0, 0), MeshUpdateFlags.DontRecalculateBounds);
+                    continue; 
                 }
 
-                md.subMeshCount = 1;
-                md.SetSubMesh(0, new SubMeshDescriptor(0, triIndices.Length) { topology = MeshTopology.Triangles },
-                              MeshUpdateFlags.DontRecalculateBounds);
+                // Прямой доступ к компоненту (Фикс разлета)
+                var site = state.EntityManager.GetComponentData<VoronoiSite>(e);
+                float2 center = site.Position;
 
-                meshes[i] = new UnityEngine.Mesh { indexFormat = IndexFormat.UInt32 };
+                md.SetVertexBufferParams(verts.Length, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
+                md.SetIndexBufferParams(triIndices.Length, IndexFormat.UInt32);
+
+                var vb = md.GetVertexData<Vector3>(stream: 0);
+                for (int v = 0; v < verts.Length; v++)
+                {
+                    float3 worldPos = verts[v].Value;
+                    vb[v] = new Vector3(worldPos.x - center.x, 0f, worldPos.z - center.y);
+                }
+
+                var ib = md.GetIndexData<int>();
+                for (int idx = 0; idx < triIndices.Length; idx++) ib[idx] = triIndices[idx].Value;
+
+                md.subMeshCount = 1;
+                md.SetSubMesh(0, new SubMeshDescriptor(0, triIndices.Length) { topology = MeshTopology.Triangles }, MeshUpdateFlags.DontRecalculateBounds);
             }
 
-            UnityEngine.Mesh.ApplyAndDisposeWritableMeshData(mda, meshes, MeshUpdateFlags.Default);
+            UnityEngine.Mesh.ApplyAndDisposeWritableMeshData(mda, meshes, MeshUpdateFlags.DontRecalculateBounds);
 
-            // общий RenderMeshArray: 1 материал, N мешей (индивидуальность — по MeshArrayIndex)
             var rma = new RenderMeshArray(new[] { s_DefaultMaterial }, meshes);
-            var desc = new RenderMeshDescription(ShadowCastingMode.On, receiveShadows: true);
+            var desc = new RenderMeshDescription(shadowCastingMode: ShadowCastingMode.Off, receiveShadows: false);
 
-            for (int i = 0; i < entities.Length; i++)
+            // --- ЦИКЛ 2: КОМПОНЕНТЫ ---
+            for (int i = 0; i < countToProcess; i++)
             {
                 var e = entities[i];
                 if (!state.EntityManager.Exists(e)) continue;
 
-                // позиция: local override либо позиция сайта
-                float3 pos;
-                if (state.EntityManager.HasComponent<CellLocalPosition>(e))
-                    pos = state.EntityManager.GetComponentData<CellLocalPosition>(e).Value;
-                else
-                {
-                    var siteIndex = state.EntityManager.GetComponentData<VoronoiCell>(e).SiteIndex;
-                    sitePos.TryGetValue(siteIndex, out var sp);
-                    pos = new float3(sp.x, 0f, sp.y);
-                }
-
-                if (!state.EntityManager.HasComponent<LocalTransform>(e))
-                    state.EntityManager.AddComponentData(e, new LocalTransform
-                    {
-                        Position = pos,
-                        Rotation = quaternion.identity,
-                        Scale = 1f
-                    });
-
-                // индивидуальный цвет (URP property)
-                if (!state.EntityManager.HasComponent<Unity.Rendering.URPMaterialPropertyBaseColor>(e))
-                    state.EntityManager.AddComponentData(e, new Unity.Rendering.URPMaterialPropertyBaseColor
-                    {
-                        Value = new float4(1, 1, 1, 1)
-                    });
-
+                // Всегда помечаем как обработанное
                 state.EntityManager.AddComponent<VoronoiCellMeshTag>(e);
 
-                // привязка меша i в RenderMeshArray
+                var detailData = state.EntityManager.GetComponentData<DetailLevelData>(e);
+
+                // === ФИЛЬТР ВИДИМОСТИ ===
+                // Рисуем только последний уровень (L2), чтобы не было каши.
+                // (Предполагаем, что макс уровень = 2. Если у вас 3 уровня, ставьте < 2 или < 3)
+                if ((int)detailData.Level < 2) 
+                {
+                    continue; 
+                }
+                // ========================
+
+                var verts = state.EntityManager.GetBuffer<CellPolygonVertex>(e);
+                if (verts.Length < 3) continue;
+
+                meshes[i].RecalculateBounds();
+                var b = meshes[i].bounds;
+                b.extents = new Vector3(b.extents.x, 50.0f, b.extents.z); // Толстые границы для Scene View
+                meshes[i].bounds = b;
+
+                var site = state.EntityManager.GetComponentData<VoronoiSite>(e);
+                float3 entityPos = new float3(site.Position.x, 0, site.Position.y);
+
+                if (!state.EntityManager.HasComponent<LocalTransform>(e))
+                    state.EntityManager.AddComponentData(e, new LocalTransform { Position = entityPos, Rotation = quaternion.identity, Scale = 1f });
+
+                if (!state.EntityManager.HasComponent<RenderBounds>(e))
+                    state.EntityManager.AddComponentData(e, new RenderBounds { Value = new AABB { Center = float3.zero, Extents = new float3(1000, 50, 1000) } });
+
+                // Раскраска
+                if (!state.EntityManager.HasComponent<Unity.Rendering.URPMaterialPropertyBaseColor>(e))
+                {
+                    float4 color = new float4(0.5f, 0.5f, 0.5f, 1);
+                    
+                    // Приоритет биомам
+                    if (state.EntityManager.HasComponent<CellBiome>(e))
+                    {
+                        var biome = state.EntityManager.GetComponentData<CellBiome>(e);
+                        color = GetBiomeColor(biome.Type);
+                    }
+                    else
+                    {
+                        // Фоллбек по уровням
+                        int level = (int)detailData.Level;
+                        if (level == 0) color = new float4(0, 0, 1, 1);
+                        else if (level == 1) color = new float4(0, 1, 0, 1);
+                        else color = new float4(1, 0.5f, 0, 1);
+                    }
+                    
+                    state.EntityManager.AddComponentData(e, new Unity.Rendering.URPMaterialPropertyBaseColor { Value = color });
+                }
+
                 var mmi = MaterialMeshInfo.FromRenderMeshArrayIndices(0, i);
                 RenderMeshUtility.AddComponents(e, state.EntityManager, in desc, rma, mmi);
             }
+            
+            // sitePos.Dispose(); <--- УБРАНО, так как мы его не создавали
+        }
 
-            // помечаем, что всё создано
-            var tag = state.EntityManager.CreateEntity();
-            state.EntityManager.AddComponent<VoronoiMeshGeneratedTag>(tag);
-
-            sitePos.Dispose();
+        private static float4 GetBiomeColor(BiomeType type)
+        {
+            switch (type)
+            {
+                case BiomeType.Ocean: return new float4(0.0f, 0.2f, 0.7f, 1.0f);
+                case BiomeType.Coast: return new float4(0.9f, 0.8f, 0.6f, 1.0f);
+                case BiomeType.Ice: return new float4(0.8f, 0.9f, 1.0f, 1.0f);
+                case BiomeType.Desert: return new float4(0.9f, 0.8f, 0.4f, 1.0f);
+                case BiomeType.Grassland: return new float4(0.3f, 0.7f, 0.2f, 1.0f);
+                case BiomeType.Forest: return new float4(0.1f, 0.4f, 0.1f, 1.0f);
+                case BiomeType.Mountain: return new float4(0.5f, 0.5f, 0.5f, 1.0f);
+                case BiomeType.Snow: return new float4(0.95f, 0.95f, 0.95f, 1.0f);
+                default: return new float4(1, 0, 1, 1);
+            }
         }
 
         private static Material EnsureDefaultMaterial()
         {
-            var shader = Shader.Find("Universal Render Pipeline/Lit")
-                ?? Shader.Find("Standard")
-                ?? Shader.Find("Legacy Shaders/Diffuse");
-            return new Material(shader);
+            string path = "Materials/CellMaterial";
+            Material mat = Resources.Load<Material>(path);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+                mat = new Material(shader);
+                mat.color = Color.blue;
+            }
+            mat.enableInstancing = true;
+            return mat;
         }
     }
 }
