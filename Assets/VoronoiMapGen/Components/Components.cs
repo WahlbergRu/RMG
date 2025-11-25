@@ -127,6 +127,9 @@ namespace VoronoiMapGen.Components
         /// </summary>
         public FixedList512Bytes<BiomeColorEntry> BiomeColors;
         
+        public bool ShowDebugWireframe;  // Вкл/Выкл отрисовку линий
+        public int DebugLevelToDraw;     // -1 = Рисовать все, 0..N = Конкретный уровень
+        
     }
 
     /// <summary>
@@ -518,5 +521,23 @@ namespace VoronoiMapGen.Components
         public int TotalLevels;
         public bool IsGenerating;
         public FixedString64Bytes StatusMessage;
+    }
+}
+
+namespace VoronoiMapGen.Components
+{
+    public struct CameraSettingsData : IComponentData
+    {
+        // Настройки
+        public float PanSpeed;        // Базовая скорость перемещения
+        public float ZoomSpeed;       // Скорость приближения
+        public float MinHeight;       // Минимальная высота (максимальный зум)
+        public float MaxHeight;       // Максимальная высота (отдаление)
+        public float Smoothing;       // Коэффициент сглаживания (Lerp)
+        public float RotationSpeed;   // Если захотите вращать (Q/E)
+        
+        // Состояние
+        public float3 TargetPosition; // Куда камера стремится (для сглаживания)
+        public bool IsInitialized;    // Флаг первичной установки позиции
     }
 }

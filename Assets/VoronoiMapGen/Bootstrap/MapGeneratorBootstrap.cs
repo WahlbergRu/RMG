@@ -24,6 +24,11 @@ namespace VoronoiMapGen.Bootstrap
         public bool DrawRoads = true;
         public bool DrawBorders = true;
 
+        [Header("Debug Visualization")]
+        public bool ShowWireframe = false;
+        [Tooltip("-1 to draw All levels, or 0, 1, 2... for specific level")]
+        public int DebugLevel = -1; 
+        
         [Header("Biome Colors")]
         public Color oceanColor = new Color(0.1f, 0.3f, 0.8f, 1);
         public Color coastColor = new Color(0.9f, 0.8f, 0.6f, 1);
@@ -34,6 +39,30 @@ namespace VoronoiMapGen.Bootstrap
         public Color mountainColor = new Color(0.5f, 0.4f, 0.3f, 1);
         public Color snowColor = new Color(0.95f, 0.95f, 0.95f, 1);
 
+        void Update()
+        {
+            var world = World.DefaultGameObjectInjectionWorld;
+            if (world == null) return;
+
+            var em = world.EntityManager;
+            var query = em.CreateEntityQuery(typeof(MapSettings));
+
+            if (query.HasSingleton<MapSettings>())
+            {
+                // Читаем текущие настройки
+                var settingsEntity = query.GetSingletonEntity();
+                var settings = em.GetComponentData<MapSettings>(settingsEntity);
+
+                // Обновляем только дебаг-поля, если они изменились
+                if (settings.ShowDebugWireframe != ShowWireframe || settings.DebugLevelToDraw != DebugLevel)
+                {
+                    settings.ShowDebugWireframe = ShowWireframe;
+                    settings.DebugLevelToDraw = DebugLevel;
+                    em.SetComponentData(settingsEntity, settings);
+                }
+            }
+        }
+        
         private void OnValidate()
         {
             // Гарантируем, что массив не пустой и не null
@@ -76,7 +105,9 @@ namespace VoronoiMapGen.Bootstrap
                 DrawRoads = DrawRoads,
                 DrawBorders = DrawBorders,
                 IsGenerated = false,
-                BiomeColors = new FixedList512Bytes<BiomeColorEntry>()
+                BiomeColors = new FixedList512Bytes<BiomeColorEntry>(),
+                ShowDebugWireframe = ShowWireframe,
+                DebugLevelToDraw = DebugLevel
             };
             
             // Заполнение цветов

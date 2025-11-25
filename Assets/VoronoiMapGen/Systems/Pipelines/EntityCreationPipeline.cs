@@ -33,10 +33,9 @@ namespace VoronoiMapGen.Systems
                 polyMap.Add(edge.SiteB, edge.VertexB);
             }
 
-            // Создаем ячейки
             NativeArray<Entity> siteToCellEntityMap = CreateCellEntities(em, level, levelSettings, mapSize, cells, siteMetadata, polyMap, count);
             
-            // Создаем ребра (опционально, можно закомментировать для ускорения)
+            // Ребра создаем опционально (можно отключить для скорости)
             CreateEdgeEntities(em, level, levelSettings, edges, siteToCellEntityMap);
 
             polyMap.Dispose();
@@ -59,8 +58,6 @@ namespace VoronoiMapGen.Systems
             for(int i=0; i<count; i++) maxIndex = math.max(maxIndex, cells[i].SiteIndex);
             var lookupMap = new NativeArray<Entity>(maxIndex + 1, Allocator.Temp);
 
-            // === ИСПРАВЛЕНИЕ: ЧИСТЫЙ АРХЕТИП ===
-            // Убедитесь, что здесь НЕТ VoronoiMeshGeneratedTag!
             var cellArchetype = em.CreateArchetype(
                 typeof(VoronoiCell),
                 typeof(VoronoiSite),
@@ -77,8 +74,11 @@ namespace VoronoiMapGen.Systems
                 var cell = cells[i];
                 var meta = siteMeta[cell.SiteIndex];
 
-                // Пропускаем призраков (убирает взрывы на границах)
-                if (meta.Value < -0.5f) continue;
+                // === ИСПРАВЛЕНИЕ: БОЛЬШЕ НЕ ПРОПУСКАЕМ ПРИЗРАКОВ ===
+                // Раньше мы делали: if (meta.Value < -0.5f) continue;
+                // Теперь мы разрешаем их создание, чтобы они заполнили пустоты по краям.
+                // Обрезка (Clipper) сделает их ровными.
+                // ====================================================
 
                 var e = em.CreateEntity(cellArchetype);
 
@@ -122,7 +122,10 @@ namespace VoronoiMapGen.Systems
                 } 
                 while (polyMap.TryGetNextValue(out v, ref it));
 
+                // === ОБРЕЗКА (Это делает карту квадратной) ===
                 PolygonClipper.ClipPolygonToMapBounds(ref uniqueVerts, mapSize);
+                // =============================================
+
                 SortVerticesCCW(uniqueVerts, cell.Centroid);
 
                 var vertBuffer = em.GetBuffer<CellPolygonVertex>(e);

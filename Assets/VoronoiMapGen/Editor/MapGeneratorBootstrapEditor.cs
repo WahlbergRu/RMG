@@ -10,6 +10,10 @@ public class MapGeneratorBootstrapEditor : Editor
     private SerializedProperty mapSizeProp;
     private SerializedProperty levelConfigsProp;
     
+    // Debug
+    private SerializedProperty showWireframeProp; // <--- НОВОЕ
+    private SerializedProperty debugLevelProp;    // <--- НОВОЕ
+    
     // Rendering
     private SerializedProperty edgeWidthProp;
     private SerializedProperty roadWidthProp;
@@ -30,10 +34,16 @@ public class MapGeneratorBootstrapEditor : Editor
 
     private void OnEnable()
     {
+        // General
         seedProp = serializedObject.FindProperty("Seed");
         mapSizeProp = serializedObject.FindProperty("MapSize");
         levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
 
+        // Debug (Ищем переменные, которые вы добавили в Bootstrap)
+        showWireframeProp = serializedObject.FindProperty("ShowWireframe");
+        debugLevelProp = serializedObject.FindProperty("DebugLevel");
+
+        // Rendering
         edgeWidthProp = serializedObject.FindProperty("EdgeWidth");
         roadWidthProp = serializedObject.FindProperty("RoadWidth");
         roadColorProp = serializedObject.FindProperty("RoadColor");
@@ -41,6 +51,7 @@ public class MapGeneratorBootstrapEditor : Editor
         drawRoadsProp = serializedObject.FindProperty("DrawRoads");
         drawBordersProp = serializedObject.FindProperty("DrawBorders");
 
+        // Colors
         oceanColorProp = serializedObject.FindProperty("oceanColor");
         coastColorProp = serializedObject.FindProperty("coastColor");
         iceColorProp = serializedObject.FindProperty("iceColor");
@@ -62,15 +73,23 @@ public class MapGeneratorBootstrapEditor : Editor
         EditorGUILayout.Space();
 
         // --- Level Configurations ---
-        // Отрисовываем массив. Unity сама предоставит поле "Size" и элементы.
-        // Заголовок берется из атрибута [Header] или названия переменной,
-        // но так как мы рисуем PropertyField для всего массива, он будет выглядеть стандартно.
         EditorGUILayout.LabelField($"Multi-Level Settings (Total: {levelConfigsProp.arraySize})", EditorStyles.boldLabel);
-        
-        // true означает, что мы рисуем и дочерние элементы (раскрываем массив)
         EditorGUILayout.PropertyField(levelConfigsProp, new GUIContent("Levels Configuration"), true); 
-        
         EditorGUILayout.Space();
+
+        // --- DEBUG SETTINGS (НОВАЯ СЕКЦИЯ) ---
+        // Если забыли добавить переменные в сам Bootstrap, здесь будет ошибка NullReference,
+        // но если вы выполнили прошлый шаг, всё будет ок.
+        if (showWireframeProp != null && debugLevelProp != null)
+        {
+            EditorGUILayout.LabelField("Debug Visualization", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(showWireframeProp);
+            if (showWireframeProp.boolValue)
+            {
+                EditorGUILayout.PropertyField(debugLevelProp);
+            }
+            EditorGUILayout.Space();
+        }
 
         // --- Rendering Settings ---
         EditorGUILayout.LabelField("Rendering Settings", EditorStyles.boldLabel);
@@ -85,7 +104,6 @@ public class MapGeneratorBootstrapEditor : Editor
         // --- Biome Colors ---
         EditorGUILayout.LabelField("Biome Colors", EditorStyles.boldLabel);
         
-        // Можно свернуть цвета в Foldout, чтобы не занимали много места
         bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", true);
         showColors = EditorGUILayout.Foldout(showColors, "Biome Palette");
         if (showColors)
