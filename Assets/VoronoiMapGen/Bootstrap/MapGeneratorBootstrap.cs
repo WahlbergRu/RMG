@@ -12,23 +12,22 @@ namespace VoronoiMapGen.Bootstrap
         public int Seed = 12345;
         public Vector2 MapSize = new Vector2(1000, 1000);
         
-        // LevelsCount убрали. Теперь длина массива и есть количество уровней.
         [Header("Level Configurations")] 
         public LevelSettings[] LevelConfigs = new LevelSettings[1]; 
         
+        [Header("Debug Visualization")]
+        public bool ShowWireframe = false;
+        // Заменили int на массив галочек
+        public bool[] DebugLevels = new bool[8]; 
+
         [Header("Rendering Settings")]
-        public float EdgeWidth = 10f; // Ваши значения с картинки
+        public float EdgeWidth = 10f; 
         public float RoadWidth = 10f;
         public Color RoadColor = Color.yellow;
         public Color BorderColor = Color.blue;
         public bool DrawRoads = true;
         public bool DrawBorders = true;
 
-        [Header("Debug Visualization")]
-        public bool ShowWireframe = false;
-        [Tooltip("-1 to draw All levels, or 0, 1, 2... for specific level")]
-        public int DebugLevel = -1; 
-        
         [Header("Biome Colors")]
         public Color oceanColor = new Color(0.1f, 0.3f, 0.8f, 1);
         public Color coastColor = new Color(0.9f, 0.8f, 0.6f, 1);
@@ -39,39 +38,12 @@ namespace VoronoiMapGen.Bootstrap
         public Color mountainColor = new Color(0.5f, 0.4f, 0.3f, 1);
         public Color snowColor = new Color(0.95f, 0.95f, 0.95f, 1);
 
-        void Update()
-        {
-            var world = World.DefaultGameObjectInjectionWorld;
-            if (world == null) return;
-
-            var em = world.EntityManager;
-            var query = em.CreateEntityQuery(typeof(MapSettings));
-
-            if (query.HasSingleton<MapSettings>())
-            {
-                // Читаем текущие настройки
-                var settingsEntity = query.GetSingletonEntity();
-                var settings = em.GetComponentData<MapSettings>(settingsEntity);
-
-                // Обновляем только дебаг-поля, если они изменились
-                if (settings.ShowDebugWireframe != ShowWireframe || settings.DebugLevelToDraw != DebugLevel)
-                {
-                    settings.ShowDebugWireframe = ShowWireframe;
-                    settings.DebugLevelToDraw = DebugLevel;
-                    em.SetComponentData(settingsEntity, settings);
-                }
-            }
-        }
-        
         private void OnValidate()
         {
-            // Гарантируем, что массив не пустой и не null
             if (LevelConfigs == null || LevelConfigs.Length == 0)
             {
                 LevelConfigs = new LevelSettings[1];
             }
-
-            // Если массив создался пустым (все нули), инициализируем дефолтом
             if (LevelConfigs[0].SiteCount == 0 && LevelConfigs[0].ScaleFactor == 0.0f)
             {
                 ConfigureDefaultLevelConfigs();
@@ -80,6 +52,13 @@ namespace VoronoiMapGen.Bootstrap
         
         void Start()
         {
+            // Инициализация массива отладки, если пустой
+            if (DebugLevels == null || DebugLevels.Length == 0)
+            {
+                DebugLevels = new bool[8];
+                for (int i = 0; i < 8; i++) DebugLevels[i] = true;
+            }
+
             if (LevelConfigs == null || LevelConfigs.Length == 0)
             {
                  Debug.LogWarning("LevelConfigs was null. Initializing defaults.");
@@ -93,11 +72,13 @@ namespace VoronoiMapGen.Bootstrap
             EntityManager entityManager = world.EntityManager;
             
             Entity settingsEntity = entityManager.CreateEntity();
+            
+            // Создаем настройки с учетом маски
             var mapSettings = new MapSettings
             {
                 Seed = Seed,
                 MapSize = MapSize,
-                LevelsCount = LevelConfigs.Length, // БЕРЕМ ДЛИНУ МАССИВА
+                LevelsCount = LevelConfigs.Length,
                 EdgeWidth = EdgeWidth,
                 RoadWidth = RoadWidth,
                 RoadColor = RoadColor,
@@ -106,8 +87,10 @@ namespace VoronoiMapGen.Bootstrap
                 DrawBorders = DrawBorders,
                 IsGenerated = false,
                 BiomeColors = new FixedList512Bytes<BiomeColorEntry>(),
+                
+                // === ВАЖНО: Новые поля ===
                 ShowDebugWireframe = ShowWireframe,
-                DebugLevelToDraw = DebugLevel
+                DebugLevelMask = CalculateMask() // Считаем маску
             };
             
             // Заполнение цветов
@@ -128,10 +111,50 @@ namespace VoronoiMapGen.Bootstrap
                 levelSettingsBuffer.Add(LevelConfigs[i]);
             }
         }
+
+        // Обновление настроек в реальном времени
+        void Update()
+        {
+            var world = World.DefaultGameObjectInjectionWorld;
+            if (world == null) return;
+            var em = world.EntityManager;
+
+            var query = em.CreateEntityQuery(typeof(MapSettings));
+            if (query.HasSingleton<MapSettings>())
+            {
+                var entity = query.GetSingletonEntity();
+                var settings = em.GetComponentData<MapSettings>(entity);
+                
+                int currentMask = CalculateMask();
+
+                // Проверяем изменения (включая маску)
+                if (settings.ShowDebugWireframe != ShowWireframe || settings.DebugLevelMask != currentMask)
+                {
+                    settings.ShowDebugWireframe = ShowWireframe;
+                    settings.DebugLevelMask = currentMask;
+                    em.SetComponentData(entity, settings);
+                }
+            }
+        }
+        
+        // Превращает массив bool[] в int (битовая маска)
+        private int CalculateMask()
+        {
+            int mask = 0;
+            if (DebugLevels == null) return mask;
+            
+            for (int i = 0; i < DebugLevels.Length; i++)
+            {
+                if (DebugLevels[i])
+                {
+                    mask |= (1 << i);
+                }
+            }
+            return mask;
+        }
         
         private void ConfigureDefaultLevelConfigs()
         {
-            // L0: Global default
             LevelConfigs[0] = new LevelSettings {
                 SiteCount = 50,
                 ScaleFactor = 0.3f,

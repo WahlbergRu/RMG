@@ -128,7 +128,7 @@ namespace VoronoiMapGen.Components
         public FixedList512Bytes<BiomeColorEntry> BiomeColors;
         
         public bool ShowDebugWireframe;  // Вкл/Выкл отрисовку линий
-        public int DebugLevelToDraw;     // -1 = Рисовать все, 0..N = Конкретный уровень
+        public int DebugLevelMask;     // -1 = Рисовать все, 0..N = Конкретный уровень
         
     }
 

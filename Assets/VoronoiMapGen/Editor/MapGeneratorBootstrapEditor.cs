@@ -12,7 +12,7 @@ public class MapGeneratorBootstrapEditor : Editor
     
     // Debug
     private SerializedProperty showWireframeProp; // <--- НОВОЕ
-    private SerializedProperty debugLevelProp;    // <--- НОВОЕ
+    private SerializedProperty debugLevelsProp;    // <--- НОВОЕ
     
     // Rendering
     private SerializedProperty edgeWidthProp;
@@ -41,7 +41,7 @@ public class MapGeneratorBootstrapEditor : Editor
 
         // Debug (Ищем переменные, которые вы добавили в Bootstrap)
         showWireframeProp = serializedObject.FindProperty("ShowWireframe");
-        debugLevelProp = serializedObject.FindProperty("DebugLevel");
+        debugLevelsProp = serializedObject.FindProperty("DebugLevels"); 
 
         // Rendering
         edgeWidthProp = serializedObject.FindProperty("EdgeWidth");
@@ -77,16 +77,19 @@ public class MapGeneratorBootstrapEditor : Editor
         EditorGUILayout.PropertyField(levelConfigsProp, new GUIContent("Levels Configuration"), true); 
         EditorGUILayout.Space();
 
-        // --- DEBUG SETTINGS (НОВАЯ СЕКЦИЯ) ---
-        // Если забыли добавить переменные в сам Bootstrap, здесь будет ошибка NullReference,
-        // но если вы выполнили прошлый шаг, всё будет ок.
-        if (showWireframeProp != null && debugLevelProp != null)
+        // --- DEBUG SETTINGS ---
+        if (showWireframeProp != null && debugLevelsProp != null)
         {
             EditorGUILayout.LabelField("Debug Visualization", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(showWireframeProp);
+            
             if (showWireframeProp.boolValue)
             {
-                EditorGUILayout.PropertyField(debugLevelProp);
+                // Рисуем массив красиво
+                EditorGUILayout.PropertyField(debugLevelsProp, new GUIContent("Visible Levels"), true); 
+                
+                // Подсказка, чтобы было понятнее
+                EditorGUILayout.HelpBox("Element 0 = Global (L0)\nElement 1 = Regional (L1)\nElement 2 = Settlement (L2)", MessageType.Info);
             }
             EditorGUILayout.Space();
         }
