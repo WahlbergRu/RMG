@@ -4,61 +4,7 @@ using Unity.Mathematics;
 using UnityEngine;
 
 namespace VoronoiMapGen.Components
-{
-    /// <summary>
-    /// Настройки для каждого уровня детализации (L0-L6)
-    /// Хранит параметры, определяющие как генерируется и отображается каждый уровень.
-    /// Используется как буферный компонент, привязанный к основной сущности карты.
-    /// </summary>
-    [System.Serializable]
-    public struct LevelSettings : IBufferElementData
-    {
-        /// <summary>
-        /// Базовое количество точек для этого уровня.
-        /// Определяет плотность генерации: 
-        /// L0: 10 (континенты), L6: 2000 (микро-объекты)
-        /// </summary>
-        public int SiteCount;
-        
-        /// <summary>
-        /// Коэффициент уменьшения масштаба относительно предыдущего уровня.
-        /// Пример: 0.3 для L0 (очень крупные структуры), 0.9 для L6 (максимальная детализация)
-        /// </summary>
-        public float ScaleFactor;
-        
-        /// <summary>
-        /// Порог расстояния для генерации дочерних уровней.
-        /// Если игрок приближается ближе чем на этот радиус, активируется генерация следующего уровня.
-        /// Пример: L0: 1000, L6: 5 (очень близко)
-        /// </summary>
-        public float LODThreshold;
-        
-        /// <summary>
-        /// Порог расстояния для отображения уровня.
-        /// Если игрок находится ближе чем на этот радиус, уровень отображается.
-        /// Всегда >= LODThreshold (обычно на 20-50% больше)
-        /// Пример: L0: 2000, L6: 10
-        /// </summary>
-        public float RenderThreshold;
-        
-        /// <summary>
-        /// Смещение для расчета "ценности точки".
-        /// Используется в формуле: Value = ValueBias + (Noise * ValueScale)
-        /// Пример: L2 (города): 0.5 (города чаще в ценных зонах)
-        /// </summary>
-        public float ValueBias;
-        
-        /// <summary>
-        /// Масштаб для расчета "ценности точки".
-        /// Определяет, насколько сильно шум влияет на итоговую ценность.
-        /// Пример: L5 (здания): 0.7 (высокая вариативность)
-        /// </summary>
-        public float ValueScale;
-        
-        
-        public int RelaxationIterations; 
-    }
-
+{ 
     /// <summary>
     /// Глобальные настройки генерации карты.
     /// Единая точка входа для всей системы, содержит основные параметры.
@@ -274,6 +220,8 @@ namespace VoronoiMapGen.Components
         /// Ценность.
         /// </summary>
         public float Value;
+        
+        public Entity ParentEntity;
     }
 
     /// <summary>
@@ -539,5 +487,34 @@ namespace VoronoiMapGen.Components
         // Состояние
         public float3 TargetPosition; // Куда камера стремится (для сглаживания)
         public bool IsInitialized;    // Флаг первичной установки позиции
+    }
+}
+
+namespace VoronoiMapGen.Components
+{
+    [System.Serializable]
+    public struct LevelSettings : IBufferElementData
+    {
+        // --- БЫЛО ---
+        // public int SiteCount; 
+        
+        // --- СТАЛО: Диапазон для вариативности ---
+        public int MinSiteCount; // Мин. детей в ячейке
+        public int MaxSiteCount; // Макс. детей в ячейке
+        
+        // Оставляем для совместимости с L0 (Global), где просто нужно общее число
+        public int GlobalSiteCount => MaxSiteCount; 
+
+        public float ScaleFactor;      // Радиус разброса внутри родителя (0.1 = кучно, 1.0 = на всю ячейку)
+        public float LODThreshold;
+        public float RenderThreshold;
+        
+        public float ValueBias;
+        public float ValueScale;
+        
+        public int RelaxationIterations;
+        
+        // Новый параметр: Шанс, что ячейка вообще будет пустой (0..1)
+        public float EmptyCellChance; 
     }
 }

@@ -44,7 +44,8 @@ namespace VoronoiMapGen.Bootstrap
             {
                 LevelConfigs = new LevelSettings[1];
             }
-            if (LevelConfigs[0].SiteCount == 0 && LevelConfigs[0].ScaleFactor == 0.0f)
+            
+            if (LevelConfigs[0].MaxSiteCount == 0 && LevelConfigs[0].ScaleFactor == 0.0f)
             {
                 ConfigureDefaultLevelConfigs();
             }
@@ -156,7 +157,9 @@ namespace VoronoiMapGen.Bootstrap
         private void ConfigureDefaultLevelConfigs()
         {
             LevelConfigs[0] = new LevelSettings {
-                SiteCount = 50,
+                MinSiteCount = 50,
+                MaxSiteCount = 50,
+                EmptyCellChance = 0.0f,
                 ScaleFactor = 0.3f,
                 LODThreshold = 1000f,
                 RenderThreshold = 2000f,

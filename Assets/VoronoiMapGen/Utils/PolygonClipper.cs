@@ -5,57 +5,47 @@ namespace VoronoiMapGen.Utils
 {
     public static class PolygonClipper
     {
-        // Обрезает полигон по прямоугольнику от (0,0) до (mapSize.x, mapSize.y)
-        public static void ClipPolygonToMapBounds(ref NativeList<float2> polygon, float2 mapSize)
+        // Обрезает полигон по прямоугольнику (0,0) -> (mapSize.x, mapSize.y)
+        public static void ClipToRect(ref NativeList<float2> poly, float2 mapSize)
         {
-            if (polygon.Length < 3) return;
+            if (poly.Length < 3) return;
 
-            // 4 плоскости отсечения: Лево, Право, Низ, Верх
-            ClipEdge(ref polygon, new float2(1, 0), 0);           // Left (x > 0)
-            ClipEdge(ref polygon, new float2(-1, 0), -mapSize.x); // Right (x < width) -> -x > -width
-            ClipEdge(ref polygon, new float2(0, 1), 0);           // Bottom (y > 0)
-            ClipEdge(ref polygon, new float2(0, -1), -mapSize.y); // Top (y < height) -> -y > -height
+            ClipAxis(ref poly, new float2(1, 0), 0);           // Left
+            ClipAxis(ref poly, new float2(-1, 0), -mapSize.x); // Right
+            ClipAxis(ref poly, new float2(0, 1), 0);           // Bottom
+            ClipAxis(ref poly, new float2(0, -1), -mapSize.y); // Top
         }
 
-        private static void ClipEdge(ref NativeList<float2> polygon, float2 normal, float distance)
+        private static void ClipAxis(ref NativeList<float2> poly, float2 n, float d)
         {
-            if (polygon.Length == 0) return;
+            if (poly.Length == 0) return;
+            var output = new NativeList<float2>(poly.Length + 4, Allocator.Temp);
 
-            // Используем временный список для хранения вершин текущего этапа обрезки
-            var newPoly = new NativeList<float2>(polygon.Length + 4, Allocator.Temp);
-
-            for (int i = 0; i < polygon.Length; i++)
+            for (int i = 0; i < poly.Length; i++)
             {
-                float2 current = polygon[i];
-                float2 prev = polygon[(i + polygon.Length - 1) % polygon.Length];
+                float2 curr = poly[i];
+                float2 prev = poly[(i + poly.Length - 1) % poly.Length];
 
-                // Проверяем, находятся ли точки внутри допустимой области
-                bool currInside = math.dot(current, normal) >= distance;
-                bool prevInside = math.dot(prev, normal) >= distance;
+                bool currIn = math.dot(curr, n) >= d;
+                bool prevIn = math.dot(prev, n) >= d;
 
-                if (currInside)
+                if (currIn)
                 {
-                    if (!prevInside)
-                    {
-                        // Входим в область -> добавляем точку пересечения
-                        newPoly.Add(ComputeIntersection(prev, current, normal, distance));
-                    }
-                    newPoly.Add(current);
+                    if (!prevIn) output.Add(Intersect(prev, curr, n, d));
+                    output.Add(curr);
                 }
-                else if (prevInside)
+                else if (prevIn)
                 {
-                    // Выходим из области -> добавляем точку пересечения
-                    newPoly.Add(ComputeIntersection(prev, current, normal, distance));
+                    output.Add(Intersect(prev, curr, n, d));
                 }
             }
 
-            // Копируем результат обратно
-            polygon.Clear();
-            polygon.AddRange(newPoly);
-            newPoly.Dispose();
+            poly.Clear();
+            poly.AddRange(output.AsArray());
+            output.Dispose();
         }
 
-        private static float2 ComputeIntersection(float2 a, float2 b, float2 n, float d)
+        private static float2 Intersect(float2 a, float2 b, float2 n, float d)
         {
             float t = (d - math.dot(a, n)) / (math.dot(b - a, n));
             return a + t * (b - a);

@@ -287,20 +287,35 @@ MonoBehaviour:
   Seed: 12345
   MapSize: {x: 1000, y: 1000}
   LevelConfigs:
-  - SiteCount: 10
-    ScaleFactor: 0.3
+  - MinSiteCount: 20
+    MaxSiteCount: 20
+    ScaleFactor: 1
     LODThreshold: 1000
     RenderThreshold: 2000
     ValueBias: 0
     ValueScale: 0.1
     RelaxationIterations: 1
-  - SiteCount: 50
-    ScaleFactor: 0.3
+    EmptyCellChance: 0
+  - MinSiteCount: 3
+    MaxSiteCount: 15
+    ScaleFactor: 0.9
     LODThreshold: 1000
     RenderThreshold: 2000
     ValueBias: 0
     ValueScale: 0.1
     RelaxationIterations: 1
+    EmptyCellChance: 0
+  - MinSiteCount: 5
+    MaxSiteCount: 50
+    ScaleFactor: 0.4
+    LODThreshold: 1000
+    RenderThreshold: 2000
+    ValueBias: 0
+    ValueScale: 0.1
+    RelaxationIterations: 1
+    EmptyCellChance: 0
+  ShowWireframe: 0
+  DebugLevels: 0000000000000000
   EdgeWidth: 0.1
   RoadWidth: 0.8
   RoadColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -327,6 +342,7 @@ GameObject:
   - component: {fileID: 1649242811}
   - component: {fileID: 1649242810}
   - component: {fileID: 1649242813}
+  - component: {fileID: 1649242814}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -452,6 +468,23 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!114 &1649242814
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1649242809}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fb957e2b9689474795ee658aa3da7f41, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  PanSpeed: 50
+  ZoomSpeed: 300
+  MinHeight: 20
+  MaxHeight: 10000
+  Smoothness: 7.43
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
