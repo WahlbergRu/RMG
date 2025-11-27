@@ -1,4 +1,5 @@
-﻿using Unity.Collections;
+﻿using Unity.Burst;
+using Unity.Collections;
 using Unity.Entities;
 using Unity.Entities.Graphics;
 using Unity.Mathematics;
@@ -13,123 +14,200 @@ namespace VoronoiMapGen.Systems
 {
     [WorldSystemFilter(WorldSystemFilterFlags.Presentation)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    public partial struct VoronoiMeshCreateSystem : ISystem
+    public partial class VoronoiMeshCreateSystem : SystemBase
     {
-        private static Material s_DefaultMaterial;
+        private Material _defaultMaterial;
 
-        public void OnCreate(ref SystemState state)
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct MyVertex
         {
-            if (s_DefaultMaterial == null) s_DefaultMaterial = RenderUtils.EnsureMaterial();
-            state.RequireForUpdate<MapGeneratedTag>();
+            public float3 Position;
+            public float3 Normal;
         }
 
-        public void OnUpdate(ref SystemState state)
+        protected override void OnCreate()
         {
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
+            
+            if (shader == null) 
+            {
+                Debug.LogError("CRITICAL: URP Shaders not found.");
+                return;
+            }
+
+            _defaultMaterial = new Material(shader);
+            _defaultMaterial.enableInstancing = true; 
+            _defaultMaterial.SetFloat("_Smoothness", 0.1f); 
+            _defaultMaterial.SetFloat("_Metallic", 0.0f);   
+
+            RequireForUpdate<GeometryBuiltTag>();
+            RequireForUpdate<MapGeneratedTag>();
+        }
+
+        protected override void OnUpdate()
+        {
+            if (!SystemAPI.TryGetSingleton<MapSettings>(out var settings)) return;
+            if (_defaultMaterial == null) return; 
+
+            int debugMask = settings.DebugLevelMask;
+            if (debugMask == 0) debugMask = -1;
+
             var query = SystemAPI.QueryBuilder()
                 .WithAll<VoronoiCell, CellPolygonVertex, CellTriIndex, DetailLevelData>()
-                .WithNone<VoronoiCellMeshTag>()
+                .WithNone<VoronoiCellMeshTag>() 
                 .Build();
 
             if (query.IsEmpty) return;
 
-            var settings = SystemAPI.GetSingleton<MapSettings>();
-            int debugMask = settings.DebugLevelMask;
-
             using var entities = query.ToEntityArray(Allocator.Temp);
-            int count = math.min(entities.Length, 2000); // Batch limit
+            int totalEntities = entities.Length;
+            
+            // Списки для кэширования данных, чтобы избежать обращения к Lookup после структурных изменений
+            var validIndices = new NativeList<int>(totalEntities, Allocator.Temp);
+            var validColors = new NativeList<float4>(totalEntities, Allocator.Temp); // <-- КЭШ ЦВЕТОВ
+            
+            var biomeLookup = SystemAPI.GetComponentLookup<CellBiome>(true);
+            var levelLookup = SystemAPI.GetComponentLookup<DetailLevelData>(true);
+            var bufferLookup = SystemAPI.GetBufferLookup<CellPolygonVertex>(true);
 
-            // Кэш позиций для локального пивота
-            var siteQuery = SystemAPI.QueryBuilder().WithAll<VoronoiSite>().Build();
-            var sitesArr = siteQuery.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
-            var sitePosMap = new NativeParallelHashMap<int, float2>(sitesArr.Length, Allocator.Temp);
-            foreach (var s in sitesArr) sitePosMap.TryAdd(s.Index, s.Position);
-            sitesArr.Dispose();
+            biomeLookup.Update(ref CheckedStateRef);
+            levelLookup.Update(ref CheckedStateRef);
+            bufferLookup.Update(ref CheckedStateRef);
+
+            // --- ПРОХОД 1: Фильтрация и подготовка данных (Пока Lookup валидны) ---
+            for (int i = 0; i < totalEntities; i++)
+            {
+                Entity e = entities[i];
+                
+                var levelData = levelLookup[e];
+                if ((debugMask & (1 << (int)levelData.Level)) == 0) continue;
+
+                // Отключаем океан
+                bool isOcean = false;
+                if (biomeLookup.HasComponent(e))
+                {
+                    if (biomeLookup[e].Type == BiomeType.Ocean) isOcean = true;
+                }
+                if (isOcean) continue;
+
+                if (bufferLookup[e].Length < 3) continue;
+
+                // --- РАСЧЕТ ЦВЕТА ЗАРАНЕЕ ---
+                float4 color = new float4(0.5f, 0.5f, 0.5f, 1); 
+                if (biomeLookup.HasComponent(e))
+                {
+                    var biome = biomeLookup[e];
+                    color = RenderUtils.GetBiomeColor(biome.Type);
+                    
+                    if (levelData.Level == 0) color *= 0.6f;
+                    else if (levelData.Level == DetailLevel.Regional) color *= 0.8f;
+
+                    var random = new Unity.Mathematics.Random((uint)e.Index + 1);
+                    float tint = random.NextFloat(-0.05f, 0.05f);
+                    color += new float4(tint, tint, tint, 0);
+                }
+
+                validIndices.Add(i);
+                validColors.Add(color); // Сохраняем цвет
+            }
+
+            int count = math.min(validIndices.Length, 2000); 
+            if (count == 0) return;
 
             var mda = Mesh.AllocateWritableMeshData(count);
             var meshes = new Mesh[count];
 
-            for (int i = 0; i < count; i++)
+            // --- ПРОХОД 2: Генерация данных меша (Native Arrays) ---
+            for (int k = 0; k < count; k++)
             {
-                meshes[i] = new Mesh { name = $"Cell_{i}" };
-                var e = entities[i];
-                var verts = state.EntityManager.GetBuffer<CellPolygonVertex>(e);
-                var tris = state.EntityManager.GetBuffer<CellTriIndex>(e);
-                var md = mda[i];
+                int index = validIndices[k];
+                var e = entities[index];
+                // Здесь мы добавляем компонент - это СТРУКТУРНОЕ ИЗМЕНЕНИЕ.
+                // После этой строки biomeLookup становится невалидным!
+                EntityManager.AddComponent<VoronoiCellMeshTag>(e); 
 
-                if (verts.Length < 3) {
-                    md.SetVertexBufferParams(0, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
-                    md.SetIndexBufferParams(0, IndexFormat.UInt32);
-                    md.subMeshCount = 1;
-                    continue;
-                }
+                meshes[k] = new Mesh { name = $"Cell_{entities[index].Index}" };
+                var md = mda[k];
 
-                float2 center = float2.zero;
-                var cell = state.EntityManager.GetComponentData<VoronoiCell>(e);
-                if (sitePosMap.TryGetValue(cell.SiteIndex, out float2 p)) center = p;
+                var verts = EntityManager.GetBuffer<CellPolygonVertex>(e);
+                var tris = EntityManager.GetBuffer<CellTriIndex>(e);
 
-                md.SetVertexBufferParams(verts.Length, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3));
+                md.SetVertexBufferParams(verts.Length, 
+                    new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
+                    new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 0)
+                );
                 md.SetIndexBufferParams(tris.Length, IndexFormat.UInt32);
 
-                var vb = md.GetVertexData<Vector3>(0);
+                var vb = md.GetVertexData<MyVertex>(stream: 0);
+                
                 for (int v = 0; v < verts.Length; v++)
-                    vb[v] = new Vector3(verts[v].Value.x - center.x, 0, verts[v].Value.z - center.y);
+                {
+                    vb[v] = new MyVertex 
+                    {
+                        Position = verts[v].Value, 
+                        Normal = new float3(0, 1, 0) 
+                    };
+                }
 
                 var ib = md.GetIndexData<int>();
-                for (int t = 0; t < tris.Length; t++) ib[t] = tris[t].Value;
+                for (int t = 0; t < tris.Length; t++)
+                {
+                    ib[t] = tris[t].Value;
+                }
 
                 md.subMeshCount = 1;
                 md.SetSubMesh(0, new SubMeshDescriptor(0, tris.Length), MeshUpdateFlags.DontRecalculateBounds);
+
+                // Чтобы не читать levelLookup, можно было закэшировать и offset, 
+                // но DetailLevelData мы можем прочитать через EntityManager безопасно, так как он на MainThread.
+                // Но лучше взять DetailLevelData до изменений, если возможно. 
+                // В данном случае мы просто пересчитаем offset снова или закэшируем.
+                // Для простоты оставим чтение компонента, это безопасно через EM, но не через Lookup.
+                
+                var levelData = EntityManager.GetComponentData<DetailLevelData>(e);
+                int lvl = (int)levelData.Level;
+                int targetLevel = settings.LevelsCount - 1; 
+                float yOffset = (lvl - targetLevel) * 25.0f; 
+
+                EntityManager.SetComponentData(e, new LocalTransform 
+                { 
+                    Position = new float3(0, yOffset, 0), 
+                    Rotation = quaternion.identity, 
+                    Scale = 1f 
+                });
             }
 
             Mesh.ApplyAndDisposeWritableMeshData(mda, meshes, MeshUpdateFlags.DontRecalculateBounds);
-            var rma = new RenderMeshArray(new[] { s_DefaultMaterial }, meshes);
-            var desc = new RenderMeshDescription(ShadowCastingMode.Off, false);
+            
+            var rma = new RenderMeshArray(new[] { _defaultMaterial }, meshes);
+            var desc = new RenderMeshDescription(ShadowCastingMode.On, true);
 
-            for (int i = 0; i < count; i++)
+            // --- ПРОХОД 3: Настройка рендера (Структурные изменения продолжаются) ---
+            for (int k = 0; k < count; k++)
             {
-                var e = entities[i];
-                if (!state.EntityManager.Exists(e)) continue;
+                int originalIndex = validIndices[k];
+                var e = entities[originalIndex];
                 
-                state.EntityManager.AddComponent<VoronoiCellMeshTag>(e);
+                meshes[k].RecalculateNormals();
+                meshes[k].RecalculateBounds();
+                
+                EntityManager.AddComponentData(e, new RenderBounds { Value = meshes[k].bounds.ToAABB() });
 
-                var lvl = (int)state.EntityManager.GetComponentData<DetailLevelData>(e).Level;
-                if ((debugMask & (1 << lvl)) == 0) continue; // Проверка галочки в инспекторе
+                // Берем цвет из КЭША, а не из Lookup!
+                float4 color = validColors[k];
+                
+                if (!EntityManager.HasComponent<URPMaterialPropertyBaseColor>(e))
+                    EntityManager.AddComponentData(e, new URPMaterialPropertyBaseColor { Value = color });
+                else
+                    EntityManager.SetComponentData(e, new URPMaterialPropertyBaseColor { Value = color });
 
-                var cell = state.EntityManager.GetComponentData<VoronoiCell>(e);
-                float2 center = float2.zero;
-                if (sitePosMap.TryGetValue(cell.SiteIndex, out float2 p)) center = p;
-
-                // Bounds fix
-                meshes[i].RecalculateBounds();
-                var b = meshes[i].bounds; b.extents += new Vector3(0, 10, 0); meshes[i].bounds = b;
-
-                // Transform
-                state.EntityManager.AddComponentData(e, new LocalTransform { Position = new float3(center.x, lvl * 0.1f, center.y), Rotation = quaternion.identity, Scale = 1f });
-                state.EntityManager.AddComponentData(e, new RenderBounds { Value = b.ToAABB() });
-
-                if (!state.EntityManager.HasComponent<URPMaterialPropertyBaseColor>(e))
-                {
-                    float4 color = new float4(1, 0, 1, 1); // Magenta (ошибка)
-
-                    // Если есть данные биома - используем их
-                    if (state.EntityManager.HasComponent<CellBiome>(e))
-                    {
-                        var biome = state.EntityManager.GetComponentData<CellBiome>(e);
-                        color = RenderUtils.GetBiomeColor(biome.Type);
-        
-                        // Добавляем вариативность цвета в зависимости от температуры/влажности
-                        // Чтобы карта не выглядела как плоская раскраска
-                        float tint = biome.Temperature * 0.1f; 
-                        color.x += tint; 
-                        color.y += tint * 0.5f;
-                    }
-    
-                    state.EntityManager.AddComponentData(e, new URPMaterialPropertyBaseColor { Value = color });
-                }
-
-                RenderMeshUtility.AddComponents(e, state.EntityManager, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, i));
+                RenderMeshUtility.AddComponents(e, EntityManager, desc, rma, 
+                    MaterialMeshInfo.FromRenderMeshArrayIndices(0, k));
             }
-            sitePosMap.Dispose();
+            
+            if (count > 0)
+                Debug.Log($"[MeshSystem] Built {count} Land Meshes.");
         }
     }
 }

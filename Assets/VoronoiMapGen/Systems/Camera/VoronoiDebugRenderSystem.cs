@@ -9,13 +9,12 @@ namespace VoronoiMapGen.Systems
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     public partial class VoronoiDebugRenderSystem : SystemBase
     {
-        // Палитра для дальтоников (High Contrast)
         private readonly Color[] _levelColors = new Color[]
         {
-            Color.black,            // L0: Черный (Контуры стран)
-            new Color(1f, 0.8f, 0f),// L1: Золотой/Желтый (Регионы) - хорошо виден на синем/зеленом
-            Color.white,            // L2: Белый (Города/Детали)
-            Color.cyan              // L3+: Циан
+            Color.black,            // L0
+            new Color(1f, 0.8f, 0f),// L1 (Yellow)
+            Color.white,            // L2 (White)
+            Color.cyan              // L3
         };
 
         protected override void OnUpdate()
@@ -25,63 +24,48 @@ namespace VoronoiMapGen.Systems
             
             int mask = settings.DebugLevelMask;
 
+            // 1. Отрисовка контуров ячеек (Voronoi Edges)
+            // Мы берем данные из CellPolygonVertex, которые уже построены
             foreach (var (vertsBuffer, levelData) in SystemAPI.Query<DynamicBuffer<CellPolygonVertex>, RefRO<DetailLevelData>>())
             {
                 int lvl = (int)levelData.ValueRO.Level;
-                
-                // Пропускаем выключенные уровни
                 if ((mask & (1 << lvl)) == 0) continue;
                 if (vertsBuffer.Length < 2) continue;
 
                 Color c = (lvl < _levelColors.Length) ? _levelColors[lvl] : Color.magenta;
                 
-                // СИЛЬНОЕ разнесение по высоте ("Этажерка")
-                // L0 = 50м, L1 = 100м, L2 = 150м. 
-                // Так они не будут "мерцать" друг в друге.
-                float yOffset = 50.0f + (lvl * 50.0f); 
+                // Поднимаем линии повыше, чтобы не мерцали с землей
+                float yOffset = 2.0f + (lvl * 1.0f); 
 
                 var verts = vertsBuffer.AsNativeArray();
                 for (int i = 0; i < verts.Length; i++)
                 {
                     float3 a = verts[i].Value;
-                    float3 b = verts[(i + 1) % verts.Length].Value; // Замыкаем полигон
+                    float3 b = verts[(i + 1) % verts.Length].Value; // Замыкаем
 
-                    float3 start = new float3(a.x, yOffset, a.z);
-                    float3 end = new float3(b.x, yOffset, b.z);
-
-                    // ТРЮК С ТОЛЩИНОЙ
-                    if (lvl == 0)
-                    {
-                        // Рисуем жирную черную линию для L0 (3 линии рядом)
-                        DrawThickLine(start, end, c, 0.4f); 
-                    }
-                    else if (lvl == 1)
-                    {
-                        // Рисуем чуть жирнее для L1 (2 линии)
-                        DrawThickLine(start, end, c, 0.2f);
-                    }
-                    else
-                    {
-                        // Обычная тонкая линия для L2
-                        Debug.DrawLine(start, end, c);
-                    }
+                    // Рисуем чуть выше земли
+                    Debug.DrawLine(
+                        new float3(a.x, yOffset, a.z), 
+                        new float3(b.x, yOffset, b.z), 
+                        c
+                    );
                 }
             }
-        }
-
-        // Хелпер для имитации толщины Debug.DrawLine
-        private void DrawThickLine(float3 a, float3 b, Color color, float width)
-        {
-            // Центральная
-            Debug.DrawLine(a, b, color);
             
-            // Смещения по X и Z
-            float3 offset1 = new float3(width, 0, width);
-            float3 offset2 = new float3(-width, 0, width);
-            
-            Debug.DrawLine(a + offset1, b + offset1, color);
-            Debug.DrawLine(a - offset1, b - offset1, color);
-            // Можно добавить еще, если нужно жирнее
+            // 2. Отрисовка направления рек (Опционально, для отладки гидрологии)
+            // Если включен дебаг для L1 (Regional)
+            if ((mask & (1 << 1)) != 0) 
+            {
+                 foreach (var (hydro, cell) in SystemAPI.Query<RefRO<HydrologyData>, RefRO<VoronoiCell>>())
+                 {
+                     if (hydro.ValueRO.IsRiver)
+                     {
+                         // Рисуем маленькую красную точку в центре речной ячейки
+                         float3 c = new float3(cell.ValueRO.Centroid.x, 5f, cell.ValueRO.Centroid.y);
+                         Debug.DrawLine(c, c + new float3(0, 2, 0), Color.blue);
+                     }
+                 }
+            }
         }
     }
 }

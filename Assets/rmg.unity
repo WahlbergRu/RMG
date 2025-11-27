@@ -287,29 +287,38 @@ MonoBehaviour:
   Seed: 12345
   MapSize: {x: 1000, y: 1000}
   LevelConfigs:
-  - MinSiteCount: 20
+  - MinSiteCount: 15
     MaxSiteCount: 20
     ScaleFactor: 1
-    LODThreshold: 1000
-    RenderThreshold: 2000
+    LODThreshold: 2000
+    RenderThreshold: 5000
     ValueBias: 0
     ValueScale: 0.1
-    RelaxationIterations: 1
+    RelaxationIterations: 5
     EmptyCellChance: 0
-  - MinSiteCount: 3
+  - MinSiteCount: 10
     MaxSiteCount: 15
-    ScaleFactor: 0.9
+    ScaleFactor: 0.8
     LODThreshold: 1000
     RenderThreshold: 2000
     ValueBias: 0
-    ValueScale: 0.1
-    RelaxationIterations: 1
+    ValueScale: 0.2
+    RelaxationIterations: 3
     EmptyCellChance: 0
-  - MinSiteCount: 5
-    MaxSiteCount: 50
-    ScaleFactor: 0.4
-    LODThreshold: 1000
-    RenderThreshold: 2000
+  - MinSiteCount: 2
+    MaxSiteCount: 4
+    ScaleFactor: 0.6
+    LODThreshold: 300
+    RenderThreshold: 800
+    ValueBias: 0
+    ValueScale: 0.3
+    RelaxationIterations: 2
+    EmptyCellChance: 0
+  - MinSiteCount: 2
+    MaxSiteCount: 4
+    ScaleFactor: 0.9
+    LODThreshold: 50
+    RenderThreshold: 200
     ValueBias: 0
     ValueScale: 0.1
     RelaxationIterations: 1
@@ -328,7 +337,7 @@ MonoBehaviour:
   desertColor: {r: 0.9, g: 0.8, b: 0.5, a: 1}
   grasslandColor: {r: 0.3, g: 0.7, b: 0.2, a: 1}
   forestColor: {r: 0.1, g: 0.5, b: 0.1, a: 1}
-  mountainColor: {r: 0.5, g: 0.4, b: 0.3, a: 1}
+  mountainColor: {r: 0.3301887, g: 0.30604753, b: 0.28190637, a: 1}
   snowColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
 --- !u!1 &1649242809
 GameObject:
@@ -392,8 +401,8 @@ Camera:
   near clip plane: 0.3
   far clip plane: 2000
   field of view: 60
-  orthographic: 0
-  orthographic size: 5
+  orthographic: 1
+  orthographic size: 600
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -482,8 +491,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   PanSpeed: 50
   ZoomSpeed: 300
-  MinHeight: 20
-  MaxHeight: 10000
+  MinHeight: -200
+  MaxHeight: 1000
   Smoothness: 7.43
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
