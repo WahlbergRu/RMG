@@ -5,86 +5,151 @@ using VoronoiMapGen.Components;
 
 namespace VoronoiMapGen.Systems
 {
-    // Запускаем в PresentationSystemGroup, чтобы движение было плавным каждый кадр
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     public partial class CameraControlSystem : SystemBase
     {
         protected override void OnUpdate()
         {
-            // 1. Проверки на наличие необходимых данных
-            if (Camera.main == null) return;
-            if (!SystemAPI.TryGetSingletonRW<CameraSettingsData>(out var cameraSettingsRef)) return;
+            // 1. Получаем ссылки и данные
+            // Если камеры нет, ничего не делаем
+            var camera = Camera.main;
+            if (camera == null) return;
+
+            // Пытаемся получить компоненты настроек
+            if (!SystemAPI.TryGetSingletonRW<CameraSettingsData>(out var settingsRw)) return;
             if (!SystemAPI.TryGetSingleton<MapSettings>(out var mapSettings)) return;
 
-            ref var settings = ref cameraSettingsRef.ValueRW;
+            // Работаем с данными
+            ref var settings = ref settingsRw.ValueRW;
             float dt = SystemAPI.Time.DeltaTime;
-            
-            // 2. Инициализация (ставим камеру в центр карты при первом запуске)
+
+            // -----------------------------------------------------------------------
+            // 2. Инициализация (Первый запуск)
+            // -----------------------------------------------------------------------
             if (!settings.IsInitialized)
             {
-                float centerX = mapSettings.MapSize.x * 0.5f;
-                float centerZ = mapSettings.MapSize.y * 0.5f;
-                // Стартуем с высоты 80% от максимума, чтобы видеть всю карту
-                float startY = settings.MaxHeight * 0.8f; 
-
-                var startPos = new float3(centerX, startY, centerZ);
-                
-                
-                Camera.main.transform.position = startPos;
-                Camera.main.transform.rotation = Quaternion.Euler(90f, 0f, 0f); // Строго вниз
-                
-                settings.TargetPosition = startPos;
-                settings.IsInitialized = true;
+                InitializeCamera(camera, ref settings, mapSettings);
                 return;
             }
 
-            // 3. Ввод данных (Input)
-            // Используем Legacy Input для простоты. Если у вас New Input System, замените эти строки.
-            float moveX = Input.GetAxis("Horizontal"); // A/D
-            float moveZ = Input.GetAxis("Vertical");   // W/S
-            float scroll = Input.mouseScrollDelta.y;   // Колесико
+            // -----------------------------------------------------------------------
+            // 3. Обработка Ввода (Input)
+            // -----------------------------------------------------------------------
+            float moveX = Input.GetAxis("Horizontal"); // A/D или стрелки
+            float moveZ = Input.GetAxis("Vertical");   // W/S или стрелки
+            float scroll = Input.mouseScrollDelta.y;   // Колесико мыши
 
-            // 4. Расчет высотного множителя (Height Factor)
-            // Чем выше камера, тем быстрее она должна двигаться.
-            // Нормализуем высоту от 0 до 1 (примерно) или используем линейную зависимость.
-            float currentHeight = settings.TargetPosition.y;
-            // Если мы на высоте MinHeight -> множитель ~0.1 (медленно)
-            // Если мы на высоте MaxHeight -> множитель 1.0 (быстро)
-            float heightRatio = math.clamp(currentHeight / settings.MaxHeight, 0.05f, 1.0f);
+            // -----------------------------------------------------------------------
+            // 4. Логика Зума (Zoom)
+            // -----------------------------------------------------------------------
+            
+            // Текущий уровень "зума" хранится в TargetPosition.y
+            // (Для Ortho это Size, для Perspective это Высота)
+            float currentZoomLevel = settings.TargetPosition.y;
 
-            // 5. Логика Зума (Zoom)
-            if (math.abs(scroll) > 0.01f)
+            // Рассчитываем коэффициент высоты (0..1), чтобы менять скорость
+            // Если мы на MinHeight -> ratio = 0, если на MaxHeight -> ratio = 1
+            float zoomRatio = math.clamp((currentZoomLevel - settings.MinHeight) / (settings.MaxHeight - settings.MinHeight), 0f, 1f);
+            
+            // Базовая множитель скорости, чтобы на макс высоте летать быстрее
+            float speedMultiplier = 1f + zoomRatio * 2f; 
+
+            if (math.abs(scroll) > 0.001f)
             {
-                // Зум тоже должен зависеть от текущей высоты, чтобы не пролетать сквозь землю мгновенно
-                float zoomStep = scroll * settings.ZoomSpeed * heightRatio * 5.0f * dt; // x5 для чувствительности
-                settings.TargetPosition.y -= zoomStep;
+                // Скорость зума тоже зависит от текущей высоты (логарифмическое ощущение)
+                float zoomDelta = scroll * settings.ZoomSpeed * speedMultiplier * dt;
+                settings.TargetPosition.y -= zoomDelta;
             }
 
-            // Ограничиваем высоту (Clamp Zoom)
+            // Ограничиваем зум (высоту или размер)
             settings.TargetPosition.y = math.clamp(settings.TargetPosition.y, settings.MinHeight, settings.MaxHeight);
 
-            // 6. Логика Панорамирования (Pan)
-            if (math.abs(moveX) > 0.01f || math.abs(moveZ) > 0.01f)
+            // -----------------------------------------------------------------------
+            // 5. Логика Перемещения (Pan)
+            // -----------------------------------------------------------------------
+            if (math.abs(moveX) > 0.001f || math.abs(moveZ) > 0.001f)
             {
-                // Вектор движения в плоскости XZ
                 float3 moveDir = new float3(moveX, 0, moveZ);
                 
-                // Скорость зависит от высоты (heightRatio)
-                float currentPanSpeed = settings.PanSpeed * (1f + heightRatio * 5f); // *5 чтобы на верху летать быстро
-                
-                settings.TargetPosition += moveDir * currentPanSpeed * dt;
+                // Если ортографическая камера, зум влияет на охват, значит скорость должна расти линейно с размером
+                float panSpeed = settings.PanSpeed * speedMultiplier;
+
+                settings.TargetPosition += moveDir * panSpeed * dt;
             }
 
-            // 7. Ограничение границами карты (Clamp Bounds)
-            // Добавляем отступы (padding), чтобы нельзя было улететь совсем в пустоту
-            float padding = settings.MaxHeight * 0.5f; 
+            // -----------------------------------------------------------------------
+            // 6. Ограничение границами карты (Clamping)
+            // -----------------------------------------------------------------------
+            float padding = settings.MaxHeight * 0.5f; // Запас по краям
             settings.TargetPosition.x = math.clamp(settings.TargetPosition.x, -padding, mapSettings.MapSize.x + padding);
             settings.TargetPosition.z = math.clamp(settings.TargetPosition.z, -padding, mapSettings.MapSize.y + padding);
 
-            // 8. Применение сглаживания (Lerp)
-            // Двигаем реальную камеру к целевой позиции
-            float3 newPos = math.lerp(Camera.main.transform.position, settings.TargetPosition, settings.Smoothing * dt);
-            Camera.main.transform.position = newPos;
+            // -----------------------------------------------------------------------
+            // 7. Применение к Unity Камере (Smoothing & Apply)
+            // -----------------------------------------------------------------------
+            
+            // Интерполяция (Lerp) для плавности
+            float smoothFactor = settings.Smoothing * dt;
+
+            if (camera.orthographic)
+            {
+                // --- ORTHOGRAPHIC MODE ---
+                
+                // 1. Плавно меняем размер (Zoom)
+                // Используем TargetPosition.y как целевой OrthographicSize
+                camera.orthographicSize = math.lerp(camera.orthographicSize, settings.TargetPosition.y, smoothFactor);
+
+                // 2. Плавно меняем позицию X и Z (Pan)
+                // Y держим фиксированным (например, 100), чтобы не улететь за FarClipPlane
+                float3 currentPos = camera.transform.position;
+                float3 targetPosXZ = new float3(settings.TargetPosition.x, 100f, settings.TargetPosition.z);
+                
+                // Lerp только для X и Z
+                float3 newPos = math.lerp(currentPos, targetPosXZ, smoothFactor);
+                camera.transform.position = newPos;
+            }
+            else
+            {
+                // --- PERSPECTIVE MODE ---
+                
+                // Просто летим всей камерой к TargetPosition (где Y - это высота)
+                float3 currentPos = camera.transform.position;
+                float3 newPos = math.lerp(currentPos, settings.TargetPosition, smoothFactor);
+                camera.transform.position = newPos;
+            }
+        }
+
+        // Выносим инициализацию в отдельный метод для чистоты
+        private void InitializeCamera(Camera camera, ref CameraSettingsData settings, MapSettings mapSettings)
+        {
+            float centerX = mapSettings.MapSize.x * 0.5f;
+            float centerZ = mapSettings.MapSize.y * 0.5f;
+            
+            // Начальный зум (80% от максимума)
+            float initialZoom = settings.MaxHeight * 0.8f;
+
+            // Настраиваем поворот (смотрит вниз)
+            camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+
+            if (camera.orthographic)
+            {
+                // Для ортографии ставим камеру высоко физически
+                camera.transform.position = new Vector3(centerX, 100f, centerZ);
+                camera.orthographicSize = initialZoom;
+                
+                // TargetPosition хранит X, Zoom, Z
+                settings.TargetPosition = new float3(centerX, initialZoom, centerZ);
+            }
+            else
+            {
+                // Для перспективы ставим камеру на нужную высоту
+                Vector3 startPos = new Vector3(centerX, initialZoom, centerZ);
+                camera.transform.position = startPos;
+                
+                settings.TargetPosition = startPos;
+            }
+
+            settings.IsInitialized = true;
         }
     }
 }

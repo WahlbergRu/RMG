@@ -296,35 +296,32 @@ MonoBehaviour:
     ValueScale: 0.1
     RelaxationIterations: 5
     EmptyCellChance: 0
-  - MinSiteCount: 10
-    MaxSiteCount: 15
-    ScaleFactor: 0.8
+    VisualInset: 0
+    VisualSmoothing: 0
+  - MinSiteCount: 30
+    MaxSiteCount: 35
+    ScaleFactor: 1
     LODThreshold: 1000
     RenderThreshold: 2000
     ValueBias: 0
     ValueScale: 0.2
-    RelaxationIterations: 3
+    RelaxationIterations: 0
     EmptyCellChance: 0
-  - MinSiteCount: 2
-    MaxSiteCount: 4
-    ScaleFactor: 0.6
+    VisualInset: 0
+    VisualSmoothing: 0
+  - MinSiteCount: 5
+    MaxSiteCount: 30
+    ScaleFactor: 3
     LODThreshold: 300
     RenderThreshold: 800
     ValueBias: 0
     ValueScale: 0.3
-    RelaxationIterations: 2
-    EmptyCellChance: 0
-  - MinSiteCount: 2
-    MaxSiteCount: 4
-    ScaleFactor: 0.9
-    LODThreshold: 50
-    RenderThreshold: 200
-    ValueBias: 0
-    ValueScale: 0.1
     RelaxationIterations: 1
     EmptyCellChance: 0
-  ShowWireframe: 0
-  DebugLevels: 0000000000000000
+    VisualInset: 0
+    VisualSmoothing: 0
+  ShowWireframe: 1
+  DebugLevels: 0001010000000000
   EdgeWidth: 0.1
   RoadWidth: 0.8
   RoadColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -399,7 +396,7 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 2000
+  far clip plane: 99
   field of view: 60
   orthographic: 1
   orthographic size: 600
@@ -489,6 +486,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fb957e2b9689474795ee658aa3da7f41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  TargetCamera: {fileID: 0}
   PanSpeed: 50
   ZoomSpeed: 300
   MinHeight: -200

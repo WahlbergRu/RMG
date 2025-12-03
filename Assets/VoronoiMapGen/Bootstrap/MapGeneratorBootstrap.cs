@@ -157,15 +157,17 @@ namespace VoronoiMapGen.Bootstrap
         private void ConfigureDefaultLevelConfigs()
         {
             LevelConfigs[0] = new LevelSettings {
-                MinSiteCount = 50,
-                MaxSiteCount = 50,
-                EmptyCellChance = 0.0f,
-                ScaleFactor = 0.3f,
-                LODThreshold = 1000f,
-                RenderThreshold = 2000f,
+                MinSiteCount = 15,
+                MaxSiteCount = 20,
+                ScaleFactor = 1.0f,
+                LODThreshold = 2000f,
+                RenderThreshold = 5000f,
                 ValueBias = 0.0f,
                 ValueScale = 0.1f,
-                RelaxationIterations = 1
+                RelaxationIterations = 5,
+                
+                VisualInset = 0.0f, 
+                VisualSmoothing = 0 
             };
         }
     }

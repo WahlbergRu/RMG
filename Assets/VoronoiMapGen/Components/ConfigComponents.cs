@@ -40,6 +40,8 @@ namespace VoronoiMapGen.Components
         public float ValueScale;
         public int RelaxationIterations;
         public float EmptyCellChance; 
+        [Range(0, 20)] public float VisualInset;
+        [Range(0, 10)] public int VisualSmoothing;  
     }
 
     public struct CameraSettingsData : IComponentData

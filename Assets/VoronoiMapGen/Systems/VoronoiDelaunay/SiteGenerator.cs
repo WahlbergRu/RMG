@@ -21,25 +21,14 @@ namespace VoronoiMapGen.Systems
             in NativeArray<ClimateData> parentClimate
             )
         {
-            int totalCount;
-            if (level == 0)
-            {
-                totalCount = currentLevelSettings.GlobalSiteCount;
-            }
-            else
-            {
-                if (!parentCells.IsCreated || parentCells.Length == 0) totalCount = 0;
-                else totalCount = parentCells.Length * currentLevelSettings.MaxSiteCount;
-            }
+            // Оцениваем макс. кол-во точек
+            int parentCount = (parentCells.IsCreated) ? parentCells.Length : 1;
+            int totalMaxCount = (level == 0) 
+                ? currentLevelSettings.GlobalSiteCount 
+                : parentCount * currentLevelSettings.MaxSiteCount;
 
-            var sites = new NativeArray<float2>(totalCount, Allocator.Persistent);
-            var meta = new NativeArray<VoronoiSite>(totalCount, Allocator.Persistent);
-
-            for (int i = 0; i < totalCount; i++)
-            {
-                sites[i] = new float2(-1, -1); 
-                meta[i] = new VoronoiSite { Index = i, Value = -1, Level = level, ParentIndex = -1 };
-            }
+            var sites = new NativeList<float2>(totalMaxCount, Allocator.Persistent);
+            var meta = new NativeList<VoronoiSite>(totalMaxCount, Allocator.Persistent);
 
             var safeHydrology = parentHydrology.IsCreated ? parentHydrology : new NativeArray<HydrologyData>(0, Allocator.TempJob);
             var safeTectonics = parentTectonics.IsCreated ? parentTectonics : new NativeArray<TectonicPlateData>(0, Allocator.TempJob);
@@ -50,7 +39,7 @@ namespace VoronoiMapGen.Systems
             new GenerateSitesJob
             {
                 MapSize = settings.MapSize,
-                Seed = settings.Seed + level * 1234,
+                Seed = settings.Seed + level * 54321,
                 Level = level,
                 Settings = currentLevelSettings,
                 
@@ -60,9 +49,10 @@ namespace VoronoiMapGen.Systems
                 ParentTectonics = safeTectonics,
                 ParentClimate = safeClimate,
                 
-                Sites = sites,
-                SiteMetadata = meta
-            }.Schedule().Complete();
+                OutSites = sites,
+                OutMeta = meta
+            }.Run(); // Используем Run (Main Thread) для простоты работы с NativeList.add, или можно переделать под параллель.
+            // Для генерации точек Run вполне быстр.
 
             if (!parentHydrology.IsCreated) safeHydrology.Dispose();
             if (!parentTectonics.IsCreated) safeTectonics.Dispose();
@@ -70,7 +60,13 @@ namespace VoronoiMapGen.Systems
             if (!parentCells.IsCreated) safeParentCells.Dispose();
             if (!parentMeta.IsCreated) safeParentMeta.Dispose();
 
-            return (sites, meta);
+            // Перегоняем в Array
+            var sArray = sites.ToArray(Allocator.Persistent);
+            var mArray = meta.ToArray(Allocator.Persistent);
+            sites.Dispose();
+            meta.Dispose();
+
+            return (sArray, mArray);
         }
     }
 
@@ -84,115 +80,160 @@ namespace VoronoiMapGen.Systems
 
         [ReadOnly] public NativeArray<VoronoiCell> ParentCells;
         [ReadOnly] public NativeArray<VoronoiSite> ParentMeta;
-        
         [ReadOnly] public NativeArray<HydrologyData> ParentHydrology;
         [ReadOnly] public NativeArray<TectonicPlateData> ParentTectonics;
         [ReadOnly] public NativeArray<ClimateData> ParentClimate;
 
-        public NativeArray<float2> Sites;
-        public NativeArray<VoronoiSite> SiteMetadata;
+        public NativeList<float2> OutSites;
+        public NativeList<VoronoiSite> OutMeta;
 
         public void Execute()
         {
             var rng = new Unity.Mathematics.Random((uint)Seed);
-            int index = 0;
+            int globalIndex = 0;
 
-            // --- L0: GLOBAL ---
+            // --- СТРАТЕГИЯ ДЛЯ L0 (GLOBAL) ---
             if (Level == 0)
             {
-                int count = Settings.GlobalSiteCount;
-                for (int i = 0; i < count; i++)
+                int targetCount = Settings.GlobalSiteCount;
+                
+                // Простая Poisson-подобная генерация
+                // Генерируем кандидатов, выбираем лучшего (дальше всего от остальных)
+                for (int i = 0; i < targetCount; i++)
                 {
-                    if (index >= Sites.Length) break;
-                    float2 pos = rng.NextFloat2(float2.zero, MapSize);
-                    AddSite(index++, pos, -1, 0.5f);
+                    float2 bestPos = float2.zero;
+                    float bestDist = -1f;
+
+                    // Делаем 10 попыток найти хорошее место
+                    for(int k=0; k<10; k++)
+                    {
+                        float2 candidate = rng.NextFloat2(new float2(10, 10), MapSize - new float2(10, 10));
+                        float minDist = float.MaxValue;
+                        
+                        // Ищем дистанцию до ближайшего уже созданного
+                        if (OutSites.Length == 0) minDist = float.MaxValue;
+                        else
+                        {
+                            for(int s=0; s<OutSites.Length; s++)
+                            {
+                                float d = math.distancesq(candidate, OutSites[s]);
+                                if (d < minDist) minDist = d;
+                            }
+                        }
+
+                        if (minDist > bestDist)
+                        {
+                            bestDist = minDist;
+                            bestPos = candidate;
+                        }
+                    }
+                    AddSite(globalIndex++, bestPos, -1, 0.5f);
                 }
             }
-            // --- L1+: CHILDREN ---
+            // --- СТРАТЕГИЯ ДЛЯ L1/L2/L3 (Bi-level Constraints) ---
             else
             {
                 for (int p = 0; p < ParentCells.Length; p++)
                 {
-                    if (index >= Sites.Length) break;
-
                     var pCell = ParentCells[p];
                     if (pCell.SiteIndex >= ParentMeta.Length) continue;
                     var pMeta = ParentMeta[pCell.SiteIndex];
                     if (pMeta.Value < -0.5f) continue;
 
-                    // 1. Оценка пригодности (Suitability)
-                    float suitability = 0.5f; 
-
-                    if (ParentHydrology.Length > pCell.SiteIndex)
-                    {
-                        var hydro = ParentHydrology[pCell.SiteIndex];
-                        var tect = ParentTectonics[pCell.SiteIndex];
-                        var clim = ParentClimate[pCell.SiteIndex];
-
-                        // Логика: В океане suitability низкая, у рек высокая.
-                        // НО! Мы не обнуляем генерацию, мы просто меняем плотность.
-                        if (hydro.IsOcean || tect.IsOcean) suitability = 0.0f;
-                        else 
-                        {
-                            if (hydro.IsRiver) suitability += 0.3f;
-                            if (hydro.IsLake) suitability += 0.2f;
-                            float tempComfort = 1.0f - math.abs(clim.Temperature - 0.5f) * 2; 
-                            suitability += tempComfort * 0.2f;
-                        }
-                    }
-
-                    suitability = math.clamp(suitability, 0.0f, 1.0f);
-
-                    // 2. Расчет количества (ПЛОТНОСТЬ)
-                    // Важно: Гарантируем минимум MinSiteCount, даже если suitability 0.
-                    // Это обеспечит сплошное покрытие.
+                    // Suitability (Пригодность)
+                    float suitability = CalculateSuitability(pCell.SiteIndex);
+                    
                     int count = (int)math.lerp(Settings.MinSiteCount, Settings.MaxSiteCount, suitability);
+                    count = math.max(Settings.MinSiteCount > 0 ? Settings.MinSiteCount : 1, count);
                     
-                    // Защита от дурака: если в настройках Min=0, ставим хотя бы 1, чтобы не было дыр
-                    count = math.max(1, count); 
+                    if (suitability < 0.01f && Settings.MinSiteCount == 0) continue;
+
+                    // Расчет "Личного пространства" (Poisson radius)
+                    // Чем больше точек хотим впихнуть в родителя, тем теснее им придется быть.
+                    // Приблизительная площадь родителя ~ ScaleFactor.
+                    // Радиус точки ~= sqrt(Area / count) * 0.7
                     
-                    // Центр и радиус разброса
                     float2 center = pCell.Centroid;
-                    // ScaleFactor влияет на то, насколько широко дети разлетаются от центра родителя.
-                    // 1.0 = на всю ячейку, 0.5 = кучкуются в центре.
-                    // Для сплошного покрытия лучше ставить ближе к 0.8-1.0 в настройках.
-                    float radius = 50.0f * Settings.ScaleFactor; 
+                    float safeRadius = (50.0f * Settings.ScaleFactor) / math.sqrt(count); 
+                    float minDistSq = safeRadius * safeRadius * 0.5f; // Чуть прощаем пересечения
 
-                    for (int c = 0; c < count; c++)
+                    int spawnedInCell = 0;
+                    int attemptsTotal = 0;
+                    
+                    // Список локальных точек для быстрой проверки
+                    // Используем цикл попыток "Dart Throwing" (Бросание дротиков)
+                    
+                    while(spawnedInCell < count && attemptsTotal < count * 20)
                     {
-                        if (index >= Sites.Length) break;
-
-                        float2 dir = rng.NextFloat2Direction();
-                        // Распределяем равномернее, чтобы заполнить пространство
-                        float dist = math.sqrt(rng.NextFloat()) * radius;
+                        attemptsTotal++;
                         
-                        float2 pos = center + dir * dist;
-                        pos = math.clamp(pos, new float2(1), MapSize - new float2(1));
+                        // Генерируем точку внутри "описанного круга" родителя
+                        // (Умножаем на ScaleFactor, чтобы заполнять углы)
+                        float genRadius = 60.0f * Settings.ScaleFactor; // Условный радиус ячейки
+                        if (Level == 2) genRadius = 15.0f * Settings.ScaleFactor; // Для L3 поменьше
+                        if (Level >= 3) genRadius = 5.0f * Settings.ScaleFactor; 
 
-                        AddSite(index++, pos, pCell.SiteIndex, suitability);
+                        // Лучше использовать "Box" распределение вокруг центра, оно лучше заполняет квадраты Вороного
+                        float2 rndOffset = rng.NextFloat2(-genRadius, genRadius);
+                        float2 candidate = center + rndOffset;
+
+                        // Clamp to map
+                        candidate = math.clamp(candidate, new float2(1), MapSize - new float2(1));
+
+                        // Проверяем: не слишком ли близко к соседям В ЭТОЙ ЖЕ ячейке?
+                        // (Проверять всех соседей на карте долго O(N^2), проверяем только последних добавленных)
+                        bool isFree = true;
+                        
+                        // Простая эвристика: смотрим последние 'count' точек
+                        int startCheck = math.max(0, OutSites.Length - spawnedInCell);
+                        for(int k=startCheck; k<OutSites.Length; k++)
+                        {
+                            if (math.distancesq(candidate, OutSites[k]) < minDistSq)
+                            {
+                                isFree = false;
+                                break;
+                            }
+                        }
+
+                        if (isFree)
+                        {
+                            AddSite(globalIndex++, candidate, pCell.SiteIndex, suitability);
+                            spawnedInCell++;
+                        }
                     }
                 }
             }
-            
-            // Финал
-            for (int i = index; i < Sites.Length; i++)
+        }
+
+        private float CalculateSuitability(int parentIdx)
+        {
+            float s = 0.5f;
+            if (ParentHydrology.Length > parentIdx)
             {
-                Sites[i] = new float2(-999, -999);
-                SiteMetadata[i] = new VoronoiSite { Index = i, Value = -1 };
+                var h = ParentHydrology[parentIdx];
+                var t = ParentTectonics[parentIdx];
+                var c = ParentClimate[parentIdx];
+
+                if (h.IsOcean || t.IsOcean) return 0.0f;
+                
+                if (h.IsRiver) s += 0.3f;
+                float temp = 1.0f - math.abs(c.Temperature - 0.5f) * 2;
+                s += temp * 0.2f;
             }
+            return math.clamp(s, 0f, 1f);
         }
 
         private void AddSite(int idx, float2 pos, int parentIdx, float val)
         {
-            Sites[idx] = pos;
-            SiteMetadata[idx] = new VoronoiSite
+            OutSites.Add(pos);
+            OutMeta.Add(new VoronoiSite
             {
                 Index = idx,
                 Position = pos,
                 Level = Level,
                 ParentIndex = parentIdx,
                 Value = val
-            };
+            });
         }
     }
 }

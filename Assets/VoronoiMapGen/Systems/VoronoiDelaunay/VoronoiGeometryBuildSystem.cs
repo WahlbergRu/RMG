@@ -10,218 +10,161 @@ namespace VoronoiMapGen.Systems
 {
     [BurstCompile]
     [UpdateInGroup(typeof(SimulationSystemGroup))]
-    public partial struct VoronoiGeometryBuildSystem : ISystem
+    public partial class VoronoiGeometryBuildSystem : SystemBase
     {
-        [BurstCompile]
-        public void OnUpdate(ref SystemState state)
+        protected override void OnUpdate()
         {
+            // Проверка состояний: ждем генерации карты, но не работаем, если геометрия уже построена
             if (!SystemAPI.HasSingleton<MapGeneratedTag>() || SystemAPI.HasSingleton<GeometryBuiltTag>())
                 return;
 
-            MapSettings settings = new MapSettings { MapSize = new float2(1000, 1000), Seed = 12345 };
-            if (SystemAPI.TryGetSingleton(out MapSettings s)) settings = s;
+            // 1. Получаем настройки
+            var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
+            var settings = SystemAPI.GetComponent<MapSettings>(settingsEntity);
+            int maxLevel = settings.LevelsCount;
 
+            // 2. Получаем все сущности ячеек
             var cellQuery = SystemAPI.QueryBuilder()
-                .WithAll<VoronoiCell, CellPolygonVertex, VoronoiSite>() 
+                .WithAll<VoronoiCell, CellPolygonVertex, VoronoiSite>()
                 .Build();
             
+            // Копируем в массив, чтобы можно было безопасно итерироваться
             var entities = cellQuery.ToEntityArray(Allocator.Temp);
-            var cells = cellQuery.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
-            var sites = cellQuery.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
 
-            if (entities.Length == 0) return;
-
-            BufferLookup<CellPolygonVertex> bufferLookup = SystemAPI.GetBufferLookup<CellPolygonVertex>(isReadOnly: true);
-            bufferLookup.Update(ref state);
-
-            ComponentLookup<CellBiome> biomeLookup = SystemAPI.GetComponentLookup<CellBiome>(isReadOnly: true);
-            biomeLookup.Update(ref state);
+            // 3. Создаем кэш для быстрого доступа (чтобы не использовать тяжелые Lookup)
+            var allCells = new NativeParallelHashMap<Entity, VoronoiCell>(entities.Length, Allocator.Temp);
+            var allSites = new NativeParallelHashMap<Entity, VoronoiSite>(entities.Length, Allocator.Temp);
+            
+            for (int i = 0; i < entities.Length; i++)
+            {
+                allCells.Add(entities[i], EntityManager.GetComponentData<VoronoiCell>(entities[i]));
+                allSites.Add(entities[i], EntityManager.GetComponentData<VoronoiSite>(entities[i]));
+            }
 
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-            for (int i = 0; i < entities.Length; i++)
-            {
-                var e = entities[i];
-                // Фильтруем мусор
-                if (sites[i].Value < -0.5f || math.any(math.isnan(cells[i].Centroid))) continue;
+            // 4. Подготавливаем многоразовые буферы для математики (Allocator.Temp очистится сам в конце кадра)
+            // Использование Capacity 128 покрывает 99% случаев без реаллокации
+            var reusePoly = new NativeList<float2>(128, Allocator.Temp);
+            var reuseParent = new NativeList<float2>(128, Allocator.Temp);
 
-                BiomeType biomeType = BiomeType.Grassland;
-                float centerHeight = 0;
-
-                if (biomeLookup.HasComponent(e))
-                {
-                    var b = biomeLookup[e];
-                    biomeType = b.Type;
-                    centerHeight = b.Elevation; 
-                }
-
-                ProcessCell(e, cells[i], settings, ecb, bufferLookup, biomeType, centerHeight);
-            }
+            // // 5. ГЛАВНЫЙ ЦИКЛ ПО УРОВНЯМ (Иерархия)
+            // // Мы обрабатываем уровни строго по порядку (0 -> 1 -> 2),
+            // // чтобы когда мы перешли к детям (1), геометрия родителей (0) была уже готова.
+            // for (int lvl = 0; lvl < maxLevel; lvl++)
+            // {
+            //     for (int i = 0; i < entities.Length; i++)
+            //     {
+            //         Entity e = entities[i];
+            //         VoronoiCell cell = allCells[e];
+            //         
+            //         // Фильтр уровня
+            //         if (cell.Level != lvl) continue;
+            //         
+            //         // Фильтр валидности (пропускаем "призраков")
+            //         if (allSites[e].Value < -0.5f) continue;
+            //         if (math.any(math.isnan(cell.Centroid))) continue;
+            //
+            //         // Проверка наличия родителя
+            //         bool hasParent = (cell.Level > 0 && 
+            //                           cell.ParentEntity != Entity.Null && 
+            //                           allCells.ContainsKey(cell.ParentEntity));
+            //
+            //         // Обработка конкретной ячейки
+            //         ProcessCellImmediate(e, cell, settings, hasParent, ecb, reusePoly, reuseParent);
+            //     }
+            // }
             
-            var builtEntity = state.EntityManager.CreateEntity();
-            state.EntityManager.AddComponentData(builtEntity, new GeometryBuiltTag());
-            ecb.Playback(state.EntityManager);
+            // 6. Завершение
+            // Создаем сущность-маркер, что геометрия готова
+            var builtEntity = ecb.CreateEntity();
+            ecb.AddComponent(builtEntity, new GeometryBuiltTag());
             
-            entities.Dispose(); cells.Dispose(); sites.Dispose(); ecb.Dispose();
+            // Применяем изменения (тэги Dirty и маркер)
+            ecb.Playback(EntityManager);
+            ecb.Dispose();
+            
+            entities.Dispose();
+            allCells.Dispose();
+            allSites.Dispose();
+            reusePoly.Dispose();
+            reuseParent.Dispose();
         }
 
-        private static void ProcessCell(
+        private void ProcessCellImmediate(
             Entity e, 
             VoronoiCell cell, 
             MapSettings settings, 
-            EntityCommandBuffer ecb, 
-            BufferLookup<CellPolygonVertex> lookup,
-            BiomeType biomeType,
-            float centerHeight)
+            bool hasParent,
+            EntityCommandBuffer ecb,
+            NativeList<float2> poly, 
+            NativeList<float2> parentPoly) 
         {
-            if (!lookup.HasBuffer(e)) return;
-            var srcBuffer = lookup[e];
-            if (srcBuffer.Length < 3) return;
+            // Очистка буферов перед использованием
+            poly.Clear();
+            parentPoly.Clear();
 
-            var poly = new NativeList<float2>(srcBuffer.Length + 8, Allocator.Temp);
-            for (int k = 0; k < srcBuffer.Length; k++) 
-                poly.Add(new float2(srcBuffer[k].Value.x, srcBuffer[k].Value.z));
+            // 1. Загружаем исходную геометрию ячейки (из диаграммы Вороного)
+            DynamicBuffer<CellPolygonVertex> vertexBuffer = EntityManager.GetBuffer<CellPolygonVertex>(e);
+            
+            // Если полигон вырожденный или пустой - пропускаем
+            if (vertexBuffer.Length < 3) return;
 
-            // 1. Clipping & Sorting
+            for (int k = 0; k < vertexBuffer.Length; k++) 
+                poly.Add(new float2(vertexBuffer[k].Value.x, vertexBuffer[k].Value.z));
+
+            // 2. Сортировка вершин (Clockwise), чтобы обеспечить стабильный порядок
             poly.Sort(new PolygonUtils.ClockwiseComparer(cell.Centroid));
+
+            // 3. Обрезка по границам карты (Map Bounds)
             PolygonUtils.ClipToBounds(ref poly, settings.MapSize);
 
-            // Обрезка родителем (чтобы дети не вылезали за границы L0/L1)
-            if (cell.Level > 0 && cell.ParentEntity != Entity.Null && lookup.HasBuffer(cell.ParentEntity))
+            // 4. Обрезка по Родителю (Hierarchical Clipping)
+            if (hasParent)
             {
-                var parentBuffer = lookup[cell.ParentEntity];
-                if (parentBuffer.Length >= 3)
+                // Читаем буфер родителя напрямую.
+                // Так как цикл идет по уровням, родитель УЖЕ был обработан и обрезан в этом же кадре.
+                if (EntityManager.HasBuffer<CellPolygonVertex>(cell.ParentEntity))
                 {
-                    var parentPoly = new NativeArray<float3>(parentBuffer.Length, Allocator.Temp);
-                    for(int p=0; p<parentBuffer.Length; p++) parentPoly[p] = parentBuffer[p].Value;
-                    PolygonUtils.ClipToPolygon(ref poly, parentPoly);
-                    parentPoly.Dispose();
+                    DynamicBuffer<CellPolygonVertex> pBuf = EntityManager.GetBuffer<CellPolygonVertex>(cell.ParentEntity);
+                    if (pBuf.Length >= 3)
+                    {
+                        // Копируем форму родителя
+                        for(int p=0; p<pBuf.Length; p++) 
+                            parentPoly.Add(new float2(pBuf[p].Value.x, pBuf[p].Value.z));
+
+                        // ВЫПОЛНЯЕМ ОБРЕЗКУ
+                        // Используем новую, точную версию PolygonUtils с double precision
+                        PolygonUtils.ClipToPolygon(ref poly, parentPoly);
+                    }
                 }
             }
 
-            // 2. INSET (Отступы) - ГЛАВНОЕ ИЗМЕНЕНИЕ
-            float inset = 0f;
-            int smooth = 0;
-            bool isWater = (biomeType == BiomeType.Ocean || biomeType == BiomeType.Coast);
-
-            if (isWater)
-            {
-                // Вода наезжает на соседей, чтобы скрыть дно (отрицательный отступ)
-                inset = (biomeType == BiomeType.Coast) ? -0.5f : -2.0f;
-                smooth = 1; // Вода гладкая
-            }
-            else
-            {
-                // СУША: Inset = 0.0f -> Сплошной монолитный террейн без дыр!
-                // Для L0 (глобальных плит) оставляем отступ, чтобы видеть структуру
-                if (cell.Level == 0) inset = 5.0f; 
-                else inset = 0.0f; 
-                
-                smooth = 0; // Угловатый Low Poly стиль
-            }
-
-            PolygonUtils.ApplyInset(ref poly, cell.Centroid, inset);
-            if (smooth > 0) PolygonUtils.ApplySmoothing(ref poly, smooth);
-
-            // 3. Генерация 3D Геометрии
-            var outVerts = ecb.SetBuffer<CellPolygonVertex>(e);
-            var outTris = ecb.SetBuffer<CellTriIndex>(e);
-            outVerts.Clear();
-            outTris.Clear();
-
-            if (poly.Length < 3) { poly.Dispose(); return; }
-
-            // --- НАСТРОЙКИ ВЫСОТЫ ---
-            // Частота шума
-            float noiseScale = 0.008f; 
-            // Амплитуда шума (насколько бугристая поверхность)
-            float noiseAmp = 0.3f;     
+            // 5. Запись финальной ЛОГИЧЕСКОЙ геометрии
+            // Внимание: мы пишем в буфер полигон "как есть" (без отступов и сглаживания).
+            // Отступы для красоты будут накладываться только в VoronoiMeshCreateSystem.
             
-            // Базовая высота. Умножаем на 1.5, чтобы горы были выше!
-            float baseH = math.max(0.1f, centerHeight * 1.5f); 
-            
-            var topVerts = new NativeList<float3>(poly.Length, Allocator.Temp);
+            vertexBuffer.Clear();
+            DynamicBuffer<CellTriIndex> triBuffer = EntityManager.GetBuffer<CellTriIndex>(e);
+            triBuffer.Clear();
 
+            if (poly.Length < 3) return;
+
+            // Запись вершин
             for (int i = 0; i < poly.Length; i++)
+                vertexBuffer.Add(new CellPolygonVertex { Value = new float3(poly[i].x, 0, poly[i].y) });
+
+            // Триангуляция (Triangle Fan) - подходит для выпуклых полигонов (результат обрезки выпуклых)
+            // Вершины: 0, 1, 2 | 0, 2, 3 | 0, 3, 4 ...
+            for (int i = 1; i < poly.Length - 1; i++)
             {
-                float2 vPos = poly[i];
-                float y = 0;
-                
-                if (isWater)
-                {
-                    // Вода плоская
-                    y = (biomeType == BiomeType.Coast) ? -0.05f : -0.3f;
-                }
-                else
-                {
-                    // СУША: 3D наклон
-                    // Получаем уникальный шум для каждой вершины
-                    float detail = noise.snoise(vPos * noiseScale + new float2(settings.Seed * 0.1f));
-                    
-                    // Формула: Основная высота + Детализация
-                    // baseH * 0.7f -> Основной "стол"
-                    // detail * noiseAmp * baseH -> Искривление краев вверх/вниз
-                    y = baseH * 0.7f + (detail * noiseAmp * baseH);
-                    
-                    // Не даем уйти под воду
-                    if (y < 0.01f) y = 0.01f;
-                }
-                topVerts.Add(new float3(vPos.x, y, vPos.y));
-            }
-
-            // --- A. Верхняя крышка ---
-            int topStartIndex = 0; 
-            for(int i=0; i<topVerts.Length; i++) outVerts.Add(new CellPolygonVertex { Value = topVerts[i] });
-
-            for (int i = 1; i < topVerts.Length - 1; i++)
-            {
-                outTris.Add(new CellTriIndex { Value = topStartIndex + 0 });
-                outTris.Add(new CellTriIndex { Value = topStartIndex + i + 1 });
-                outTris.Add(new CellTriIndex { Value = topStartIndex + i });
-            }
-
-            // --- B. Стены (Skirts) ---
-            // Строим стены, чтобы скрыть перепады высот между соседями
-            if (biomeType != BiomeType.Ocean)
-            {
-                int bottomStartIndex = outVerts.Length;
-
-                for (int i = 0; i < topVerts.Length; i++)
-                {
-                    float3 v = topVerts[i];
-                    
-                    // --- ИЗМЕНЕНИЕ: Глубина стенки ---
-                    // Так как шаг между уровнями = 25, делаем стенку 30,
-                    // чтобы она гарантированно вошла в нижний слой.
-                    v.y = -30.0f; 
-                    
-                    outVerts.Add(new CellPolygonVertex { Value = v });
-                }
-
-                // ... (Триангуляция стенок без изменений) ...
-                int len = topVerts.Length;
-                for (int i = 0; i < len; i++)
-                {
-                    int next = (i + 1) % len;
-                    
-                    int topA = topStartIndex + i;
-                    int topB = topStartIndex + next;
-                    int botA = bottomStartIndex + i;
-                    int botB = bottomStartIndex + next;
-
-                    outTris.Add(new CellTriIndex { Value = topA });
-                    outTris.Add(new CellTriIndex { Value = topB });
-                    outTris.Add(new CellTriIndex { Value = botB });
-
-                    outTris.Add(new CellTriIndex { Value = topA });
-                    outTris.Add(new CellTriIndex { Value = botB });
-                    outTris.Add(new CellTriIndex { Value = botA });
-                }
+                triBuffer.Add(new CellTriIndex { Value = 0 });
+                triBuffer.Add(new CellTriIndex { Value = i });
+                triBuffer.Add(new CellTriIndex { Value = i + 1 });
             }
             
+            // Ставим флаг для системы рендеринга, что этот меш нужно перестроить
             ecb.AddComponent<CellDirtyFlag>(e);
-            poly.Dispose();
-            topVerts.Dispose();
         }
     }
 }
