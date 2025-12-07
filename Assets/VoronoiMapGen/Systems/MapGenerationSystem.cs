@@ -6,6 +6,8 @@ using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Jobs; 
 using VoronoiMapGen.Utils; 
+using VoronoiMapGen.Systems.Utils; // Для MapProcessingHelpers
+using VoronoiMapGen.Systems.Data;  // Для MapHistoryData
 
 namespace VoronoiMapGen.Systems
 {
@@ -15,55 +17,28 @@ namespace VoronoiMapGen.Systems
         private MapSettings m_Settings;
         private NativeArray<LevelSettings> m_LevelSettings;
 
-        // --- Persistent Storage (Данные между уровнями) ---
-        // Храним данные предыдущих уровней, чтобы дети (L1) могли читать родителей (L0)
-        private NativeArray<VoronoiCell>[] m_LevelCells;
-        private NativeArray<float2>[] m_LevelSites;
-        private NativeArray<VoronoiSite>[] m_LevelMeta;
-        
-        // Хранение данных симуляции для передачи детям
-        private NativeArray<HydrologyData>[] m_LevelHydrology;
-        private NativeArray<TectonicPlateData>[] m_LevelTectonics;
-        private NativeArray<ClimateData>[] m_LevelClimate;
+        // Менеджер истории для хранения данных между уровнями
+        private MapHistoryData m_History;
 
         private int m_CurrentLevel = 0;
         private bool m_IsInitialized = false;
         private bool m_IsComplete = false;
 
-        protected override void OnCreate()
-        {
-            RequireForUpdate<MapSettings>();
+        protected override void OnCreate() 
+        { 
+            RequireForUpdate<MapSettings>(); 
         }
 
         protected override void OnDestroy()
         {
-            // Полная очистка памяти при остановке
             if (m_LevelSettings.IsCreated) m_LevelSettings.Dispose();
-            
-            if (m_LevelCells != null)
-            {
-                for (int i = 0; i < m_LevelCells.Length; i++)
-                {
-                    if (m_LevelCells[i].IsCreated) m_LevelCells[i].Dispose();
-                    if (m_LevelSites[i].IsCreated) m_LevelSites[i].Dispose();
-                    if (m_LevelMeta[i].IsCreated) m_LevelMeta[i].Dispose();
-                    
-                    if (m_LevelHydrology[i].IsCreated) m_LevelHydrology[i].Dispose();
-                    if (m_LevelTectonics[i].IsCreated) m_LevelTectonics[i].Dispose();
-                    if (m_LevelClimate[i].IsCreated) m_LevelClimate[i].Dispose();
-                }
-            }
+            if (m_History != null) m_History.Dispose();
         }
 
         protected override void OnUpdate()
         {
             if (m_IsComplete) return;
-
-            if (!m_IsInitialized)
-            {
-                Initialize();
-                return;
-            }
+            if (!m_IsInitialized) { Initialize(); return; }
 
             if (m_CurrentLevel < m_LevelSettings.Length)
             {
@@ -79,10 +54,12 @@ namespace VoronoiMapGen.Systems
         private void Initialize()
         {
             var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
-            if (EntityManager.HasComponent<MapGeneratedTag>(settingsEntity))
-            {
-                Enabled = false;
-                return;
+            
+            // Если карта уже была сгенерирована (например, при повторном входе в PlayMode без сброса домена), отключаемся
+            if (EntityManager.HasComponent<MapGeneratedTag>(settingsEntity)) 
+            { 
+                Enabled = false; 
+                return; 
             }
 
             m_Settings = SystemAPI.GetSingleton<MapSettings>();
@@ -91,18 +68,12 @@ namespace VoronoiMapGen.Systems
 
             int count = m_LevelSettings.Length;
             
-            // Инициализация массивов массивов
-            m_LevelCells = new NativeArray<VoronoiCell>[count];
-            m_LevelSites = new NativeArray<float2>[count];
-            m_LevelMeta = new NativeArray<VoronoiSite>[count];
-            
-            m_LevelHydrology = new NativeArray<HydrologyData>[count];
-            m_LevelTectonics = new NativeArray<TectonicPlateData>[count];
-            m_LevelClimate = new NativeArray<ClimateData>[count];
+            // Инициализируем хранилище истории
+            m_History = new MapHistoryData(count);
 
             EntityManager.AddComponent<MapGenerationInProgress>(settingsEntity);
             m_IsInitialized = true;
-            Debug.Log($"[MapGen] Initialized. Total Levels: {count}");
+            Debug.Log($"[MapGen] Initialized. Generating {count} levels...");
         }
 
         private void ProcessSingleLevel(int level)
@@ -110,248 +81,216 @@ namespace VoronoiMapGen.Systems
             Debug.Log($"--- Processing Level {level} ---");
             LevelSettings levelSettings = m_LevelSettings[level];
 
-            // 1. ПОДГОТОВКА ДАННЫХ РОДИТЕЛЯ
-            // Берем данные предыдущего уровня, если он есть
-            NativeArray<VoronoiCell> pCells = (level > 0) ? m_LevelCells[level - 1] : default;
-            NativeArray<float2> pSites = (level > 0) ? m_LevelSites[level - 1] : default;
-            NativeArray<VoronoiSite> pMeta = (level > 0) ? m_LevelMeta[level - 1] : default;
-            
-            // Данные симуляции родителя (для оценки Suitability при генерации детей)
-            NativeArray<HydrologyData> pHydro = (level > 0) ? m_LevelHydrology[level - 1] : default;
-            NativeArray<TectonicPlateData> pTect = (level > 0) ? m_LevelTectonics[level - 1] : default;
-            NativeArray<ClimateData> pClim = (level > 0) ? m_LevelClimate[level - 1] : default;
+            // 1. Объявляем переменные для данных текущего уровня
+            NativeArray<float2> sites = default;
+            NativeArray<VoronoiSite> meta = default;
+            NativeArray<TectonicPlateData> tectonicData = default;
+            NativeArray<ClimateData> climateData = default;
+            NativeArray<HydrologyData> hydrologyData = default;
+            NativeArray<BiomeData> biomeData = default;
 
-            // 2. ГЕНЕРАЦИЯ СЫРЫХ ТОЧЕК (SEEDING)
-            var (rawSites, rawMeta) = SiteGenerator.Generate(
-                m_Settings, m_LevelSettings, levelSettings, 
-                level, pCells, pSites, pMeta,
-                pHydro, pTect, pClim
-            );
+            NativeList<VoronoiCell> finalCells = new NativeList<VoronoiCell>(Allocator.Persistent);
+            NativeList<VoronoiEdge> finalEdges = new NativeList<VoronoiEdge>(Allocator.Persistent);
 
-            // Фильтрация пустых слотов (-1)
-            int validCount = 0;
-            for(int i=0; i<rawSites.Length; i++) if (rawMeta[i].Value > -0.5f) validCount++;
-            
-            var sites = new NativeArray<float2>(validCount, Allocator.Persistent);
-            var meta = new NativeArray<VoronoiSite>(validCount, Allocator.Persistent);
-            
-            int idx = 0;
-            for(int i=0; i<rawSites.Length; i++) {
-                if (rawMeta[i].Value > -0.5f) {
-                    sites[idx] = rawSites[i];
-                    meta[idx] = rawMeta[i];
-                    // Обновляем индекс в структуре
-                    var m = meta[idx]; m.Index = idx; meta[idx] = m;
-                    idx++;
-                }
+            // Переменные для загрузки кэша геометрии
+            NativeArray<float2> cachedVerts = default;
+            NativeArray<int> cachedCounts = default;
+            NativeArray<VoronoiEdge> cachedEdges = default;
+
+            bool loadedFromCache = false;
+
+            // --- ЭТАП 1: ПОПЫТКА ЗАГРУЗКИ ИЗ КЭША ---
+            if (m_Settings.UseCache && MapCacheUtils.LoadLevel(m_Settings.Seed, level, 
+                out sites, out meta, out tectonicData, out climateData, out hydrologyData, out biomeData,
+                out cachedVerts, out cachedCounts, out cachedEdges))
+            {
+                Debug.Log($"[MapGen] L{level}: Loaded from Cache.");
+                loadedFromCache = true;
+
+                // Если загрузили из кэша, нужно восстановить структуру клеток и ребер из плоских массивов
+                var tempVertsList = new NativeList<float2>(cachedVerts.Length, Allocator.Temp);
+                tempVertsList.AddRange(cachedVerts);
+
+                var tempCountsList = new NativeList<int>(cachedCounts.Length, Allocator.Temp);
+                tempCountsList.AddRange(cachedCounts);
+
+                MapProcessingHelpers.AssembleFinalGeometry(level, sites, meta, 
+                    new NativeList<TriangleIndices>(0, Allocator.Temp), // Треугольники не нужны при загрузке из кэша
+                    tempVertsList, 
+                    tempCountsList, 
+                    ref finalCells, 
+                    ref finalEdges);
+                
+                // В кэше сохранены точные обрезанные ребра, используем их
+                finalEdges.Clear();
+                finalEdges.AddRange(cachedEdges);
+
+                cachedVerts.Dispose(); 
+                cachedCounts.Dispose(); 
+                cachedEdges.Dispose();
             }
-            rawSites.Dispose();
-            rawMeta.Dispose();
-
-            // 3. ГЕОМЕТРИЯ И РЕЛАКСАЦИЯ (RELAXATION LOOP)
-            int iterations = levelSettings.RelaxationIterations;
             
-            NativeList<TriangleIndices> triangles = new NativeList<TriangleIndices>(Allocator.TempJob);
-            NativeList<float2> cellVertices = new NativeList<float2>(Allocator.TempJob); 
-            NativeList<int> cellCounts = new NativeList<int>(Allocator.TempJob);
-
-            for (int iter = 0; iter <= iterations; iter++)
+            // --- ЭТАП 2: ПРОЦЕДУРНАЯ ГЕНЕРАЦИЯ (Если нет кэша) ---
+            if (!loadedFromCache)
             {
-                bool isLast = (iter == iterations);
-                DelaunayBuilder.Triangulate(sites, ref triangles, m_Settings.MapSize);
-                cellVertices.Clear(); cellCounts.Clear();
-                VoronoiBuilder.BuildCells(sites, triangles, m_Settings.MapSize, ref cellVertices, ref cellCounts);
+                // Получаем данные предыдущего уровня из истории
+                m_History.TryGetPreviousLevel(level, 
+                    out var pCells, out var pSites, out var pMeta, 
+                    out var pHydro, out var pTect, out var pClim);
 
-                if (!isLast) ApplyLloydRelaxation(sites, cellVertices, cellCounts, m_Settings.MapSize);
-            }
+                // 2.1 Генерация сайтов (точек)
+                // Исправлен вызов: передаем только нужные массивы (pSites не нужен)
+                var (rawSites, rawMeta) = SiteGenerator.Generate(
+                    m_Settings, 
+                    levelSettings, 
+                    level, 
+                    pCells, 
+                    pMeta, 
+                    pHydro, 
+                    pTect, 
+                    pClim
+                );
 
-            // 4. СБОРКА ФИНАЛЬНОЙ ГЕОМЕТРИИ (Нужны ребра для симуляции)
-            var finalCells = new NativeList<VoronoiCell>(sites.Length, Allocator.TempJob);
-            var finalEdges = new NativeList<VoronoiEdge>(triangles.Length * 3, Allocator.TempJob);
+                // Фильтруем "призраков" (точки за границами)
+                (sites, meta) = MapProcessingHelpers.FilterValidSites(rawSites, rawMeta, Allocator.Persistent);
+                rawSites.Dispose(); 
+                rawMeta.Dispose();
 
-            AssembleFinalGeometry(level, sites, meta, cellVertices, cellCounts, ref finalCells, ref finalEdges);
+                // 2.2 Триангуляция и Диаграмма Вороного
+                var tri = new NativeList<TriangleIndices>(Allocator.TempJob);
+                var cv = new NativeList<float2>(Allocator.TempJob); 
+                var cc = new NativeList<int>(Allocator.TempJob);
 
-            triangles.Dispose();
-            cellVertices.Dispose();
-            cellCounts.Dispose();
-
-            // 5. СИМУЛЯЦИЯ МИРА (SIMULATION PIPELINE)
-            var tectonicData = new NativeArray<TectonicPlateData>(validCount, Allocator.TempJob);
-            var climateData = new NativeArray<ClimateData>(validCount, Allocator.TempJob);
-            var biomeData = new NativeArray<BiomeData>(validCount, Allocator.TempJob);
-            var hydrologyData = new NativeArray<HydrologyData>(validCount, Allocator.TempJob);
-
-            // ШАГ A: Тектоника (Форма острова и высоты)
-            new TectonicGenerationJob
-            {
-                Seed = m_Settings.Seed + level * 777,
-                MapSize = m_Settings.MapSize,
-                Sites = sites,
-                TectonicData = tectonicData
-            }.Schedule(validCount, 64).Complete();
-
-            // ШАГ B: Взаимодействие Плит (Хребты и Берега) - Только для L0
-            if (level == 0)
-            {
-                new TectonicInteractionJob
+                for (int iter = 0; iter <= levelSettings.RelaxationIterations; iter++)
                 {
-                    Edges = finalEdges,
+                    bool isLast = (iter == levelSettings.RelaxationIterations);
+                    DelaunayBuilder.Triangulate(sites, ref tri, m_Settings.MapSize);
+                    
+                    cv.Clear(); 
+                    cc.Clear();
+                    VoronoiBuilder.BuildCells(sites, tri, m_Settings.MapSize, ref cv, ref cc);
+                    
+                    if (!isLast) ApplyLloydRelaxation(sites, cv, cc, m_Settings.MapSize);
+                }
+
+                // 2.3 Генерация данных симуляции (Геология, Климат)
+                int count = sites.Length;
+                tectonicData = new NativeArray<TectonicPlateData>(count, Allocator.Persistent);
+                climateData = new NativeArray<ClimateData>(count, Allocator.Persistent);
+                biomeData = new NativeArray<BiomeData>(count, Allocator.Persistent);
+                hydrologyData = new NativeArray<HydrologyData>(count, Allocator.Persistent);
+
+                // Пустые массивы для L0, если нет родителей (Unity Jobs не любят null)
+                var dTm = new NativeArray<TectonicPlateData>(0, Allocator.TempJob);
+                var dCm = new NativeArray<ClimateData>(0, Allocator.TempJob);
+
+                new TectonicGenerationJob {
+                    Seed = m_Settings.Seed + level * 77, 
+                    MapSize = m_Settings.MapSize, 
+                    Level = level,
+                    Sites = sites, 
+                    SiteMeta = meta, 
+                    ParentTectonics = (level == 0) ? dTm : pTect, 
                     TectonicData = tectonicData
-                }.Run(); // Run синхронно, т.к. меняем данные соседей
+                }.Schedule(count, 64).Complete();
+
+                new ClimateGenerationJob {
+                    Seed = m_Settings.Seed + level * 88, 
+                    MapSize = m_Settings.MapSize, 
+                    Level = level,
+                    Sites = sites, 
+                    SiteMeta = meta, 
+                    Tectonics = tectonicData,
+                    ParentClimate = (level == 0) ? dCm : pClim, 
+                    Climate = climateData, 
+                    Biomes = biomeData
+                }.Schedule(count, 64).Complete();
+                
+                dTm.Dispose(); 
+                dCm.Dispose();
+
+                // 2.4 Построение Графа и Гидрология
+                NativeList<VoronoiEdge> tempEdges = MapProcessingHelpers.ExtractEdgesFromDelaunay(tri, Allocator.TempJob);
+                float maxDistSq = MapProcessingHelpers.CalculateAdaptiveGraphLimit(tri, sites, tectonicData, level);
+
+                var neighborsMap = new NativeParallelMultiHashMap<int, NeighborInfo>(tempEdges.Length * 2, Allocator.TempJob);
+                new BuildNeighborGraphJob { 
+                    Edges = tempEdges, 
+                    SitePositions = sites, 
+                    Tectonics = tectonicData, 
+                    MaxConnectionDistSq = maxDistSq, 
+                    NeighborsMap = neighborsMap 
+                }.Schedule().Complete();
+
+                var tempCellsForHydro = new NativeArray<VoronoiCell>(count, Allocator.TempJob);
+                for(int i = 0; i < count; i++) tempCellsForHydro[i] = new VoronoiCell { SiteIndex = i, Centroid = sites[i] };
+
+                new CalculateHydrologyJob {
+                    Cells = tempCellsForHydro, 
+                    Tectonics = tectonicData, 
+                    Climate = climateData,
+                    NeighborsMap = neighborsMap, 
+                    Hydrology = hydrologyData
+                }.Schedule().Complete();
+
+                tempCellsForHydro.Dispose(); 
+                neighborsMap.Dispose(); 
+                tempEdges.Dispose();
+
+                // 2.5 Финальная сборка геометрии (Cells + Edges)
+                MapProcessingHelpers.AssembleFinalGeometry(level, sites, meta, tri, cv, cc, ref finalCells, ref finalEdges);
+
+                if (m_Settings.UseCache)
+                {
+                    MapCacheUtils.SaveLevel(m_Settings.Seed, level, sites, meta, tectonicData, climateData, hydrologyData, biomeData, cv, cc, finalEdges);
+                }
+                
+                tri.Dispose(); 
+                cv.Dispose(); 
+                cc.Dispose();
             }
 
-            // ШАГ C: Климат (Температура и Базовая Влажность от Ветра)
-            new ClimateGenerationJob
-            {
-                Seed = m_Settings.Seed + level * 888,
-                MapSize = m_Settings.MapSize,
-                Sites = sites,
-                Tectonics = tectonicData,
-                Hydrology = hydrologyData, // Пока пустой, но нужен структуре
-                Climate = climateData,
-                Biomes = biomeData
-            }.Schedule(validCount, 64).Complete();
-
-            // ШАГ D: Гидрология (Реки и Озера)
-            var neighborsMap = new NativeParallelMultiHashMap<int, int>(finalEdges.Length * 2, Allocator.TempJob);
-            new BuildNeighborGraphJob 
-            { 
-                Edges = finalEdges, 
-                SiteCount = validCount, 
-                NeighborsMap = neighborsMap 
-            }.Schedule().Complete();
-
-            new CalculateHydrologyJob
-            {
-                Cells = finalCells.AsArray(),
-                Tectonics = tectonicData,
-                Climate = climateData,
-                NeighborsMap = neighborsMap,
-                Hydrology = hydrologyData
-            }.Schedule().Complete();
-
-            neighborsMap.Dispose();
-
-            // ШАГ E: Уточнение Биомов (Оазисы и Зеленые коридоры)
-            // Реки появились на шаге D, теперь они меняют биомы (пустыня -> оазис)
-            new ApplyRiverBiomesJob
-            {
-                Hydrology = hydrologyData,
-                Biomes = biomeData
-            }.Schedule(validCount, 64).Complete();
-
-
-            // 6. СОЗДАНИЕ СУЩНОСТЕЙ (ENTITY CREATION)
+            // --- ЭТАП 3: СОЗДАНИЕ ECS СУЩНОСТЕЙ ---
             EntityCreationPipeline.CreateEntities(
                 EntityManager, level, levelSettings, m_Settings.MapSize,
-                sites, meta,
-                tectonicData, climateData, biomeData, hydrologyData,
-                finalCells, finalEdges
+                sites, meta, tectonicData, climateData, biomeData, hydrologyData, finalCells, finalEdges
             );
 
-            // 7. СОХРАНЕНИЕ ДЛЯ СЛЕДУЮЩЕГО УРОВНЯ (PERSISTENCE)
-            m_LevelSites[level] = sites;
-            m_LevelMeta[level] = meta;
-            m_LevelCells[level] = new NativeArray<VoronoiCell>(finalCells.Length, Allocator.Persistent);
-            m_LevelCells[level].CopyFrom(finalCells.AsArray());
+            // --- ЭТАП 4: СОХРАНЕНИЕ В ИСТОРИЮ (Для детей) ---
+            // MapHistoryData создает глубокие копии массивов, поэтому мы можем спокойно удалить свои локальные.
+            m_History.StoreLevel(level, sites, meta, finalCells, tectonicData, climateData, hydrologyData);
 
-            m_LevelHydrology[level] = new NativeArray<HydrologyData>(hydrologyData.Length, Allocator.Persistent);
-            m_LevelHydrology[level].CopyFrom(hydrologyData);
-
-            m_LevelTectonics[level] = new NativeArray<TectonicPlateData>(tectonicData.Length, Allocator.Persistent);
-            m_LevelTectonics[level].CopyFrom(tectonicData);
-
-            m_LevelClimate[level] = new NativeArray<ClimateData>(climateData.Length, Allocator.Persistent);
-            m_LevelClimate[level].CopyFrom(climateData);
-
-            // Очистка локальных временных данных (TempJob)
-            finalCells.Dispose();
-            finalEdges.Dispose();
-            tectonicData.Dispose();
-            climateData.Dispose();
-            biomeData.Dispose();
-            hydrologyData.Dispose();
+            // --- ЭТАП 5: ОЧИСТКА ПАМЯТИ ---
+            // Обязательно удаляем массивы, созданные с Allocator.Persistent в начале метода,
+            // так как копии уже лежат в m_History.
+            if (sites.IsCreated) sites.Dispose();
+            if (meta.IsCreated) meta.Dispose();
+            if (tectonicData.IsCreated) tectonicData.Dispose();
+            if (climateData.IsCreated) climateData.Dispose();
+            if (biomeData.IsCreated) biomeData.Dispose();
+            if (hydrologyData.IsCreated) hydrologyData.Dispose();
+            
+            if (finalCells.IsCreated) finalCells.Dispose();
+            if (finalEdges.IsCreated) finalEdges.Dispose();
         }
-
-        // --- Helpers ---
 
         private void ApplyLloydRelaxation(NativeArray<float2> sites, NativeList<float2> verts, NativeList<int> counts, float2 mapSize)
         {
             int offset = 0;
-            for (int i = 0; i < sites.Length; i++)
-            {
+            for (int i = 0; i < sites.Length; i++) {
                 int vCount = counts[i];
-                if (vCount > 0)
-                {
-                    float2 centroid = float2.zero;
-                    float signedArea = 0.0f;
-                    for (int k = 0; k < vCount; k++)
-                    {
+                if (vCount > 0) {
+                    float2 c = float2.zero; float area = 0.0f;
+                    for (int k = 0; k < vCount; k++) {
                         float2 curr = verts[offset + k];
                         float2 next = verts[offset + (k + 1) % vCount];
                         float a = curr.x * next.y - next.x * curr.y;
-                        signedArea += a;
-                        centroid += (curr + next) * a;
+                        area += a; c += (curr + next) * a;
                     }
-                    if (math.abs(signedArea) > 1e-6f) {
-                        signedArea *= 3.0f;
-                        centroid /= signedArea;
-                        sites[i] = math.clamp(centroid, float2.zero, mapSize);
-                    }
+                    if (math.abs(area) > 1e-6f) sites[i] = math.clamp(c / (area * 3.0f), 0, mapSize);
                 }
                 offset += vCount;
             }
-        }
-
-        private void AssembleFinalGeometry(
-            int level, 
-            NativeArray<float2> sites, 
-            NativeArray<VoronoiSite> meta, 
-            NativeList<float2> verts, 
-            NativeList<int> counts, 
-            ref NativeList<VoronoiCell> outCells, 
-            ref NativeList<VoronoiEdge> outEdges)
-        {
-            int vertOffset = 0;
-            for (int i = 0; i < sites.Length; i++)
-            {
-                int vCount = counts[i];
-                float2 centroid = sites[i];
-
-                outCells.Add(new VoronoiCell
-                {
-                    SiteIndex = i,
-                    Centroid = centroid,
-                    Level = level,
-                    ParentRegionIndex = meta[i].ParentIndex,
-                    ParentEntity = Entity.Null
-                });
-                
-                for (int k = 0; k < vCount; k++)
-                {
-                    outEdges.Add(new VoronoiEdge
-                    {
-                        SiteA = i, SiteB = -1, 
-                        VertexA = verts[vertOffset + k],
-                        VertexB = verts[vertOffset + (k + 1) % vCount],
-                        Level = level
-                    });
-                }
-                vertOffset += vCount;
-            }
-            
-            // Логические ребра для графа
-            NativeList<TriangleIndices> tris = new NativeList<TriangleIndices>(Allocator.Temp);
-            DelaunayBuilder.Triangulate(sites, ref tris, new float2(10000,10000));
-            
-            for(int i=0; i<tris.Length; i++)
-            {
-                var t = tris[i];
-                outEdges.Add(new VoronoiEdge { SiteA = t.A, SiteB = t.B, Level = level });
-                outEdges.Add(new VoronoiEdge { SiteA = t.B, SiteB = t.C, Level = level });
-                outEdges.Add(new VoronoiEdge { SiteA = t.C, SiteB = t.A, Level = level });
-            }
-            tris.Dispose();
         }
 
         private void CompleteGeneration()
@@ -361,7 +300,7 @@ namespace VoronoiMapGen.Systems
             EntityManager.AddComponent<MapGeneratedTag>(sEntity);
             EntityManager.RemoveComponent<MapGenerationInProgress>(sEntity);
             
-            Debug.Log("[MapGen] Generation Complete!");
+            Debug.Log("[MapGen] Complete! System disabled.");
             Enabled = false; 
         }
     }

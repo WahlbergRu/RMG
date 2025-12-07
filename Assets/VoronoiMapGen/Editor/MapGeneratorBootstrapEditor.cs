@@ -2,128 +2,248 @@
 using UnityEngine;
 using VoronoiMapGen.Bootstrap;
 
-[CustomEditor(typeof(MapGeneratorBootstrap))]
-public class MapGeneratorBootstrapEditor : Editor
+namespace VoronoiMapGen.Editor
 {
-    // Properties
-    private SerializedProperty seedProp;
-    private SerializedProperty mapSizeProp;
-    private SerializedProperty levelConfigsProp;
-    
-    // Debug
-    private SerializedProperty showWireframeProp; // <--- НОВОЕ
-    private SerializedProperty debugLevelsProp;    // <--- НОВОЕ
-    
-    // Rendering
-    private SerializedProperty edgeWidthProp;
-    private SerializedProperty roadWidthProp;
-    private SerializedProperty roadColorProp;
-    private SerializedProperty borderColorProp;
-    private SerializedProperty drawRoadsProp;
-    private SerializedProperty drawBordersProp;
-
-    // Biome Colors
-    private SerializedProperty oceanColorProp;
-    private SerializedProperty coastColorProp;
-    private SerializedProperty iceColorProp;
-    private SerializedProperty desertColorProp;
-    private SerializedProperty grasslandColorProp;
-    private SerializedProperty forestColorProp;
-    private SerializedProperty mountainColorProp;
-    private SerializedProperty snowColorProp;
-
-    private void OnEnable()
+    [CustomEditor(typeof(MapGeneratorBootstrap))]
+    public class MapGeneratorBootstrapEditor : UnityEditor.Editor
     {
-        // General
-        seedProp = serializedObject.FindProperty("Seed");
-        mapSizeProp = serializedObject.FindProperty("MapSize");
-        levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
-
-        // Debug (Ищем переменные, которые вы добавили в Bootstrap)
-        showWireframeProp = serializedObject.FindProperty("ShowWireframe");
-        debugLevelsProp = serializedObject.FindProperty("DebugLevels"); 
-
-        // Rendering
-        edgeWidthProp = serializedObject.FindProperty("EdgeWidth");
-        roadWidthProp = serializedObject.FindProperty("RoadWidth");
-        roadColorProp = serializedObject.FindProperty("RoadColor");
-        borderColorProp = serializedObject.FindProperty("BorderColor");
-        drawRoadsProp = serializedObject.FindProperty("DrawRoads");
-        drawBordersProp = serializedObject.FindProperty("DrawBorders");
-
-        // Colors
-        oceanColorProp = serializedObject.FindProperty("oceanColor");
-        coastColorProp = serializedObject.FindProperty("coastColor");
-        iceColorProp = serializedObject.FindProperty("iceColor");
-        desertColorProp = serializedObject.FindProperty("desertColor");
-        grasslandColorProp = serializedObject.FindProperty("grasslandColor");
-        forestColorProp = serializedObject.FindProperty("forestColor");
-        mountainColorProp = serializedObject.FindProperty("mountainColor");
-        snowColorProp = serializedObject.FindProperty("snowColor");
-    }
-
-    public override void OnInspectorGUI()
-    {
-        serializedObject.Update();
-
-        // --- General Settings ---
-        EditorGUILayout.LabelField("General Settings", EditorStyles.boldLabel);
-        EditorGUILayout.PropertyField(seedProp);
-        EditorGUILayout.PropertyField(mapSizeProp);
-        EditorGUILayout.Space();
-
-        // --- Level Configurations ---
-        EditorGUILayout.LabelField($"Multi-Level Settings (Total: {levelConfigsProp.arraySize})", EditorStyles.boldLabel);
-        EditorGUILayout.PropertyField(levelConfigsProp, new GUIContent("Levels Configuration"), true); 
-        EditorGUILayout.Space();
-
-        // --- DEBUG SETTINGS ---
-        if (showWireframeProp != null && debugLevelsProp != null)
-        {
-            EditorGUILayout.LabelField("Debug Visualization", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(showWireframeProp);
-            
-            if (showWireframeProp.boolValue)
-            {
-                // Рисуем массив красиво
-                EditorGUILayout.PropertyField(debugLevelsProp, new GUIContent("Visible Levels"), true); 
-                
-                // Подсказка, чтобы было понятнее
-                EditorGUILayout.HelpBox("Element 0 = Global (L0)\nElement 1 = Regional (L1)\nElement 2 = Settlement (L2)", MessageType.Info);
-            }
-            EditorGUILayout.Space();
-        }
-
-        // --- Rendering Settings ---
-        EditorGUILayout.LabelField("Rendering Settings", EditorStyles.boldLabel);
-        EditorGUILayout.PropertyField(edgeWidthProp);
-        EditorGUILayout.PropertyField(roadWidthProp);
-        EditorGUILayout.PropertyField(roadColorProp);
-        EditorGUILayout.PropertyField(borderColorProp);
-        EditorGUILayout.PropertyField(drawRoadsProp);
-        EditorGUILayout.PropertyField(drawBordersProp);
-        EditorGUILayout.Space();
-
-        // --- Biome Colors ---
-        EditorGUILayout.LabelField("Biome Colors", EditorStyles.boldLabel);
+        // Core
+        private SerializedProperty seedProp;
+        private SerializedProperty useCacheProp;
+        private SerializedProperty mapSizeProp;
+        private SerializedProperty terrainHeightScaleProp; 
         
-        bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", true);
-        showColors = EditorGUILayout.Foldout(showColors, "Biome Palette");
-        if (showColors)
-        {
-            EditorGUI.indentLevel++;
-            EditorGUILayout.PropertyField(oceanColorProp);
-            EditorGUILayout.PropertyField(coastColorProp);
-            EditorGUILayout.PropertyField(iceColorProp);
-            EditorGUILayout.PropertyField(desertColorProp);
-            EditorGUILayout.PropertyField(grasslandColorProp);
-            EditorGUILayout.PropertyField(forestColorProp);
-            EditorGUILayout.PropertyField(mountainColorProp);
-            EditorGUILayout.PropertyField(snowColorProp);
-            EditorGUI.indentLevel--;
-        }
-        EditorPrefs.SetBool("MapGen_ShowColors", showColors);
+        // Configuration
+        private SerializedProperty levelConfigsProp;
+        private SerializedProperty visualConfigsProp; // <-- Внутри этого массива будут видны новые настройки рек
+        
+        // Rendering & Rivers
+        private SerializedProperty showRiversProp;        
+        private SerializedProperty riverRenderLevelsProp; 
+        private SerializedProperty renderLevelsProp;      
+        
+        // Debug & Gizmos
+        private SerializedProperty showRiverGizmosProp;   
+        private SerializedProperty riverDebugLevelsProp;  
+        private SerializedProperty showWireframeProp;     
+        private SerializedProperty debugLevelsProp;       
+        private SerializedProperty debugColorsProp;       
+        
+        // Colors
+        private SerializedProperty oceanColorProp, coastColorProp, iceColorProp, desertColorProp, 
+            grasslandColorProp, forestColorProp, mountainColorProp, snowColorProp;
+        
+        private GUIStyle headerStyle;
 
-        serializedObject.ApplyModifiedProperties();
+        private void OnEnable()
+        {
+            // Core
+            seedProp = serializedObject.FindProperty("Seed");
+            useCacheProp = serializedObject.FindProperty("UseCache");
+            mapSizeProp = serializedObject.FindProperty("MapSize");
+            terrainHeightScaleProp = serializedObject.FindProperty("TerrainHeightScale"); 
+
+            // Logic & Styles
+            levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
+            visualConfigsProp = serializedObject.FindProperty("VisualConfigs");
+
+            // Render
+            showRiversProp = serializedObject.FindProperty("ShowRivers");
+            riverRenderLevelsProp = serializedObject.FindProperty("RiverRenderLevels");
+            renderLevelsProp = serializedObject.FindProperty("RenderLevels");
+            
+            // Debug
+            showRiverGizmosProp = serializedObject.FindProperty("ShowRiverGizmos");
+            riverDebugLevelsProp = serializedObject.FindProperty("RiverDebugLevels");
+            showWireframeProp = serializedObject.FindProperty("ShowWireframe");
+            debugLevelsProp = serializedObject.FindProperty("DebugLevels");
+            debugColorsProp = serializedObject.FindProperty("DebugColors");
+
+            // Colors
+            oceanColorProp = serializedObject.FindProperty("oceanColor");
+            coastColorProp = serializedObject.FindProperty("coastColor");
+            iceColorProp = serializedObject.FindProperty("iceColor");
+            desertColorProp = serializedObject.FindProperty("desertColor");
+            grasslandColorProp = serializedObject.FindProperty("grasslandColor");
+            forestColorProp = serializedObject.FindProperty("forestColor");
+            mountainColorProp = serializedObject.FindProperty("mountainColor");
+            snowColorProp = serializedObject.FindProperty("snowColor");
+        }
+
+        public override void OnInspectorGUI()
+        {
+            MapGeneratorBootstrap bootstrap = (MapGeneratorBootstrap)target;
+            serializedObject.Update();
+
+            headerStyle = new GUIStyle(EditorStyles.boldLabel) 
+            { 
+                fontSize = 11, 
+                margin = new RectOffset(0, 0, 12, 4),
+                alignment = TextAnchor.MiddleLeft
+            };
+
+            EditorGUI.BeginChangeCheck(); 
+
+            DrawHeader("WORLD GENERATION (Require Rebuild)");
+            
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(seedProp);
+                if (GUILayout.Button("Dice", GUILayout.Width(45))) {
+                    seedProp.intValue = UnityEngine.Random.Range(0, 99999);
+                    GUI.FocusControl(null); 
+                }
+                EditorGUILayout.EndHorizontal();
+                
+                EditorGUILayout.PropertyField(useCacheProp);
+                EditorGUILayout.PropertyField(mapSizeProp);
+                EditorGUILayout.PropertyField(terrainHeightScaleProp);
+            }
+            EditorGUILayout.EndVertical();
+
+            if (levelConfigsProp != null && visualConfigsProp != null)
+            {
+                DrawHeader("CONFIGURATIONS");
+                
+                levelConfigsProp.isExpanded = EditorGUILayout.Foldout(levelConfigsProp.isExpanded, $"Logic Rules (Count: {levelConfigsProp.arraySize})", true);
+                if (levelConfigsProp.isExpanded) 
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.PropertyField(levelConfigsProp, true); // true = показывать детей (массив)
+                    EditorGUI.indentLevel--;
+                }
+                
+                // Здесь будут отображаться настройки уровней, включая новые параметры рек (VisualLevelSettings)
+                visualConfigsProp.isExpanded = EditorGUILayout.Foldout(visualConfigsProp.isExpanded, $"Visual Styles (Count: {visualConfigsProp.arraySize})", true);
+                if (visualConfigsProp.isExpanded) 
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.PropertyField(visualConfigsProp, true); // true гарантирует, что мы увидим ползунки River
+                    EditorGUI.indentLevel--;
+                }
+            }
+
+            DrawHeader("RENDER VISIBILITY");
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            {
+                EditorGUILayout.LabelField("Terrain Meshes", EditorStyles.miniBoldLabel);
+                DrawCompactLevelMask(renderLevelsProp, "Terrain Layers");
+                
+                EditorGUILayout.Space(6);
+
+                EditorGUILayout.LabelField("River Meshes", EditorStyles.miniBoldLabel);
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(showRiversProp, new GUIContent("Enable Generation"));
+                EditorGUILayout.EndHorizontal();
+
+                if (showRiversProp.boolValue)
+                {
+                    EditorGUI.indentLevel++;
+                    DrawCompactLevelMask(riverRenderLevelsProp, "River Layers");
+                    EditorGUI.indentLevel--;
+                }
+            }
+            EditorGUILayout.EndVertical();
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                serializedObject.ApplyModifiedProperties(); 
+                if (Application.isPlaying && GUIUtility.hotControl == 0)
+                {
+                    bootstrap.ResetVisualization();
+                }
+            }
+
+            DrawHeader("DEBUG TOOLS (Scene View)");
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(showWireframeProp, new GUIContent("Show Terrain Grid"));
+                EditorGUILayout.EndHorizontal();
+
+                if (showWireframeProp.boolValue)
+                {
+                    EditorGUI.indentLevel++;
+                    DrawCompactLevelMask(debugLevelsProp, "Grid Levels");
+                    if (debugColorsProp != null)
+                        EditorGUILayout.PropertyField(debugColorsProp, new GUIContent("Grid Colors"), false);
+                    EditorGUI.indentLevel--;
+                }
+
+                EditorGUILayout.Space(6);
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(showRiverGizmosProp, new GUIContent("Show River Graph"));
+                EditorGUILayout.EndHorizontal();
+
+                if (showRiverGizmosProp.boolValue)
+                {
+                    EditorGUI.indentLevel++;
+                    DrawCompactLevelMask(riverDebugLevelsProp, "Graph Levels");
+                    EditorGUI.indentLevel--;
+                }
+            }
+            EditorGUILayout.EndVertical();
+
+            GUILayout.Space(10);
+            bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", false);
+            showColors = EditorGUILayout.Foldout(showColors, "Biome Palette Colors", true);
+            if (showColors)
+            {
+                EditorGUI.indentLevel++;
+                DrawProp(oceanColorProp); DrawProp(coastColorProp); DrawProp(iceColorProp);
+                DrawProp(desertColorProp); DrawProp(grasslandColorProp); DrawProp(forestColorProp);
+                DrawProp(mountainColorProp); DrawProp(snowColorProp);
+                EditorGUI.indentLevel--;
+            }
+            EditorPrefs.SetBool("MapGen_ShowColors", showColors);
+
+            serializedObject.ApplyModifiedProperties();
+
+            GUILayout.Space(15);
+            GUI.backgroundColor = new Color(0.9f, 0.9f, 1f);
+            if (GUILayout.Button("FORCE REBUILD", GUILayout.Height(30)))
+            {
+                if (Application.isPlaying) bootstrap.ResetVisualization();
+            }
+            GUI.backgroundColor = Color.white;
+            GUILayout.Space(10);
+        }
+
+        // --- Helpers ---
+
+        private void DrawHeader(string title)
+        {
+            GUILayout.Space(5);
+            GUILayout.Label(title, headerStyle);
+        }
+
+        private void DrawProp(SerializedProperty prop)
+        {
+            if (prop != null) EditorGUILayout.PropertyField(prop);
+        }
+
+        private void DrawCompactLevelMask(SerializedProperty listProp, string label)
+        {
+            if (listProp == null || !listProp.isArray) return;
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel(label);
+
+            int originalIndent = EditorGUI.indentLevel;
+            EditorGUI.indentLevel = 0;
+
+            for (int i = 0; i < listProp.arraySize; i++)
+            {
+                SerializedProperty element = listProp.GetArrayElementAtIndex(i);
+                bool val = element.boolValue;
+                bool newVal = EditorGUILayout.ToggleLeft($"L{i}", val, GUILayout.Width(45));
+                if (newVal != val) element.boolValue = newVal;
+            }
+
+            EditorGUI.indentLevel = originalIndent;
+            EditorGUILayout.EndHorizontal();
+        }
     }
 }

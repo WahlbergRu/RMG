@@ -218,27 +218,8 @@ namespace VoronoiMapGen.Systems
 
             var vertBuffer = em.GetBuffer<CellPolygonVertex>(e);
             var triBuffer = em.GetBuffer<CellTriIndex>(e);
-
-            vertBuffer.Clear();
-            triBuffer.Clear();
-
-            for (int k = 0; k < uniqueVerts.Length; k++)
-            {
-                // Записываем плоские данные (Y=0), высота добавится позже
-                vertBuffer.Add(new CellPolygonVertex { Value = new float3(uniqueVerts[k].x, 0, uniqueVerts[k].y) });
-            }
             
-            // Простая триангуляция для начального состояния
-            if (uniqueVerts.Length >= 3)
-            {
-                for (int k = 1; k < uniqueVerts.Length - 1; k++)
-                {
-                    triBuffer.Add(new CellTriIndex { Value = 0 });
-                    triBuffer.Add(new CellTriIndex { Value = k + 1 });
-                    triBuffer.Add(new CellTriIndex { Value = k });
-                }
-            }
-            uniqueVerts.Dispose();
+            CellGeometryBuilder.BuildPolygonForCell(vertBuffer, triBuffer, cell, polyMap, mapSize);
         }
 
         private static void SortVerticesCCW(NativeList<float2> verts, float2 center)

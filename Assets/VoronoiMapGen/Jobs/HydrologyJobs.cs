@@ -7,92 +7,97 @@ using VoronoiMapGen.Components;
 namespace VoronoiMapGen.Jobs
 {
     [BurstCompile]
-    public struct BuildNeighborGraphJob : IJob
-    {
-        [ReadOnly] public NativeList<VoronoiEdge> Edges;
-        public int SiteCount;
-        public NativeParallelMultiHashMap<int, int> NeighborsMap;
-
-        public void Execute()
-        {
-            NeighborsMap.Clear();
-            for (int i = 0; i < Edges.Length; i++)
-            {
-                var edge = Edges[i];
-                if (edge.SiteA >= 0 && edge.SiteB >= 0)
-                {
-                    NeighborsMap.Add(edge.SiteA, edge.SiteB);
-                    NeighborsMap.Add(edge.SiteB, edge.SiteA);
-                }
-            }
-        }
-    }
-
-    [BurstCompile]
     public struct CalculateHydrologyJob : IJob
     {
         [ReadOnly] public NativeArray<VoronoiCell> Cells;
         [ReadOnly] public NativeArray<TectonicPlateData> Tectonics; 
         [ReadOnly] public NativeArray<ClimateData> Climate;         
-        [ReadOnly] public NativeParallelMultiHashMap<int, int> NeighborsMap;
+        [ReadOnly] public NativeParallelMultiHashMap<int, NeighborInfo> NeighborsMap;
         
         public NativeArray<HydrologyData> Hydrology;
 
         public void Execute()
         {
             int count = Cells.Length;
-            float seaLevel = 0.2f; 
-            float maxFlowDistSq = 200.0f * 200.0f; // Чуть увеличил дистанцию
-
-            // А. СТОК
+            
+            // --- ЭТАП 1: ПОИСК СТОКА (Куда течет?) + ОПРЕДЕЛЕНИЕ ИСТОКОВ ---
             for (int i = 0; i < count; i++)
             {
-                float myHeight = Tectonics[i].BaseHeight;
-                bool isUnderwater = Tectonics[i].IsOcean || myHeight < seaLevel;
-
-                if (isUnderwater)
+                var tectonic = Tectonics[i];
+                var climate = Climate[i];
+                
+                // --- Правило 1: Реки не начинаются ниже нуля ---
+                if (tectonic.IsOcean || tectonic.BaseHeight <= 0.001f) 
                 {
                     Hydrology[i] = new HydrologyData { IsOcean = true, FlowTargetIndex = -1, Flux = 0 };
                     continue;
                 }
 
-                int myIndex = Cells[i].SiteIndex;
-                float2 myPos = Cells[i].Centroid;
-                
-                int lowestNeighbor = -1;
-                float lowestHeight = myHeight;
+                // --- Аналитика Источников (откуда берется начальная вода/Flux) ---
+                float initialFlux = 0f;
 
-                if (NeighborsMap.TryGetFirstValue(myIndex, out int neighborIdx, out var it))
+                // а) Дождь (Обычный сток)
+                initialFlux += climate.Moisture * 0.5f;
+
+                // б) Ледник (Высоко и Холодно -> таяние дает мощный исток)
+                if (tectonic.BaseHeight > 0.8f && climate.Temperature < 0.35f)
+                {
+                    initialFlux += 2.0f; // Мощный старт
+                }
+                
+                // в) Болото (Низко, влажно, не холодно) -> аккумулирует воду
+                if (tectonic.BaseHeight < 0.3f && climate.Moisture > 0.7f)
+                {
+                    initialFlux += 1.0f;
+                }
+
+                // --- Поиск соседа ---
+                int bestNeighbor = -1;
+                float maxSlope = -1.0f; 
+
+                // Читаем УЖЕ отфильтрованный граф (в котором нет далеких соседей)
+                if (NeighborsMap.TryGetFirstValue(i, out NeighborInfo nInfo, out var it))
                 {
                     do
                     {
-                        if (neighborIdx >= count) continue;
-                        
-                        // Проверка на слишком длинные прыжки
-                        float2 nPos = Cells[neighborIdx].Centroid;
-                        if (math.distancesq(myPos, nPos) > maxFlowDistSq) continue;
+                        // Не течем в самого себя или в глючные индексы
+                        if (nInfo.Index >= count) continue;
 
-                        float nHeight = Tectonics[neighborIdx].BaseHeight;
-                        
-                        if (nHeight < lowestHeight)
+                        float nHeight = Tectonics[nInfo.Index].BaseHeight;
+
+                        // Если сосед океан - уровень берем 0 (чтобы гарантировать сток в море)
+                        if (Tectonics[nInfo.Index].IsOcean) nHeight = 0;
+
+                        if (nHeight < tectonic.BaseHeight)
                         {
-                            lowestHeight = nHeight;
-                            lowestNeighbor = neighborIdx;
+                            float drop = tectonic.BaseHeight - nHeight;
+                            // Дистанция уже есть в графе
+                            float slope = drop / math.max(0.1f, nInfo.Distance); 
+
+                            if (slope > maxSlope)
+                            {
+                                maxSlope = slope;
+                                bestNeighbor = nInfo.Index;
+                            }
                         }
                     } 
-                    while (NeighborsMap.TryGetNextValue(out neighborIdx, ref it));
+                    while (NeighborsMap.TryGetNextValue(out nInfo, ref it));
                 }
+
+                bool isLake = (bestNeighbor == -1); // Яма на суше
 
                 Hydrology[i] = new HydrologyData 
                 { 
-                    FlowTargetIndex = lowestNeighbor,
-                    Flux = Climate[i].Moisture, // Стартуем с дождевой воды
+                    FlowTargetIndex = bestNeighbor,
+                    Flux = initialFlux,
                     IsOcean = false,
-                    IsLake = (lowestNeighbor == -1)
+                    IsLake = isLake, 
+                    LocalSlope = isLake ? 0 : maxSlope,
+                    Type = RiverMorphology.Meandering 
                 };
             }
 
-            // Б. НАКОПЛЕНИЕ (Сортировка от гор к морю)
+            // --- ЭТАП 2: НАКОПЛЕНИЕ ВОДЫ ---
             var sortedIndices = new NativeArray<int>(count, Allocator.Temp);
             for (int i = 0; i < count; i++) sortedIndices[i] = i;
             sortedIndices.Sort(new HeightComparer { Tectonics = Tectonics });
@@ -100,74 +105,62 @@ namespace VoronoiMapGen.Jobs
             for (int k = 0; k < count; k++)
             {
                 int i = sortedIndices[k];
-                var hydro = Hydrology[i];
-
-                if (hydro.IsOcean) continue;
+                var hSource = Hydrology[i];
+                if (hSource.IsOcean) continue; // Океан никуда не течет
                 
-                if (hydro.FlowTargetIndex != -1)
+                // Если попали в озеро - вода останавливается (испаряется или образует озеро)
+                if (hSource.IsLake) continue; 
+
+                int targetIdx = hSource.FlowTargetIndex;
+                if (targetIdx != -1)
                 {
-                    var targetHydro = Hydrology[hydro.FlowTargetIndex];
-                    if (!targetHydro.IsOcean)
+                    var hTarget = Hydrology[targetIdx];
+                    // Если цель суша или озеро - передаем воду.
+                    // Если цель океан - просто сбрасываем, но поток (Flux) источника сохраняется большим (чтобы нарисовать устье).
+                    if (!hTarget.IsOcean)
                     {
-                        // Вся вода сверху + своя передается вниз
-                        targetHydro.Flux += hydro.Flux;
-                        Hydrology[hydro.FlowTargetIndex] = targetHydro;
+                        hTarget.Flux += hSource.Flux;
+                        
+                        // Определяем тип русла на основе мощности
+                        hTarget.StreamPower = hTarget.Flux * hTarget.LocalSlope; 
+                        
+                        if (hTarget.LocalSlope > 0.08f) hTarget.Type = RiverMorphology.MountainStream;
+                        else if (hTarget.Flux > 30f && hTarget.LocalSlope < 0.015f) hTarget.Type = RiverMorphology.Meandering;
+                        else hTarget.Type = RiverMorphology.Meandering;
+
+                        Hydrology[targetIdx] = hTarget;
+                    }
+                    else
+                    {
+                        // Впадение в море -> это Дельта (условно)
+                        if (hSource.Flux > 20f) 
+                        {
+                            hSource.Type = RiverMorphology.Delta;
+                            Hydrology[i] = hSource; // Обновляем сам источник, т.к. цель (океан) мы не меняем
+                        }
                     }
                 }
             }
-
-            // В. ОПРЕДЕЛЕНИЕ РЕК
-            for (int i = 0; i < count; i++)
+            
+            // --- ЭТАП 3: ФЛАГИ VISIBILITY ---
+            for(int i=0; i<count; i++)
             {
                 var h = Hydrology[i];
-                
-                // --- ИЗМЕНЕНИЕ: Снижаем порог с 5.0 до 0.8 ---
-                // Теперь даже мелкие ручьи считаются реками, но будут тонкими
-                if (!h.IsOcean && h.Flux > 0.8f) 
+                if (!h.IsOcean && !h.IsLake)
                 {
-                    h.IsRiver = true;
+                    // Рекой считается поток больше порогового
+                    // Маленькие ручейки не рисуем
+                    if (h.Flux > 2.0f) h.IsRiver = true; 
+                    Hydrology[i] = h;
                 }
-                Hydrology[i] = h;
             }
-            
             sortedIndices.Dispose();
         }
         
         struct HeightComparer : System.Collections.Generic.IComparer<int>
         {
             [ReadOnly] public NativeArray<TectonicPlateData> Tectonics;
-            public int Compare(int x, int y)
-            {
-                // Сортировка по убыванию высоты
-                return Tectonics[y].BaseHeight.CompareTo(Tectonics[x].BaseHeight);
-            }
-        }
-    }
-    
-    // Добавьте эту структуру в конец файла HydrologyJobs.cs
-    [BurstCompile]
-    public struct ApplyRiverBiomesJob : IJobParallelFor
-    {
-        [ReadOnly] public NativeArray<HydrologyData> Hydrology;
-        public NativeArray<BiomeData> Biomes; // Мы будем менять биомы
-
-        public void Execute(int i)
-        {
-            var h = Hydrology[i];
-            var b = Biomes[i];
-
-            // Не трогаем океан и побережье
-            if (b.Type == BiomeType.Ocean || b.Type == BiomeType.Coast) return;
-
-            // Если здесь течет река или озеро
-            if (h.IsRiver || h.IsLake)
-            {
-                // Превращаем пустыню и степь в Лес или Траву
-                if (b.Type == BiomeType.Desert) b.Type = BiomeType.Grassland;
-                else if (b.Type == BiomeType.Grassland) b.Type = BiomeType.Forest;
-            }
-
-            Biomes[i] = b;
+            public int Compare(int x, int y) => Tectonics[y].BaseHeight.CompareTo(Tectonics[x].BaseHeight);
         }
     }
 }

@@ -284,8 +284,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ee6f5765c0ed124283575f081ffa107, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Seed: 12345
+  Seed: 12366
+  UseCache: 0
   MapSize: {x: 1000, y: 1000}
+  TerrainHeightScale: 50
+  ShowRivers: 1
+  ShowRiverGizmos: 1
+  RiverLevels: 00000000
   LevelConfigs:
   - MinSiteCount: 15
     MaxSiteCount: 20
@@ -298,20 +303,20 @@ MonoBehaviour:
     EmptyCellChance: 0
     VisualInset: 0
     VisualSmoothing: 0
-  - MinSiteCount: 30
-    MaxSiteCount: 35
+  - MinSiteCount: 11
+    MaxSiteCount: 15
     ScaleFactor: 1
     LODThreshold: 1000
     RenderThreshold: 2000
     ValueBias: 0
     ValueScale: 0.2
-    RelaxationIterations: 0
+    RelaxationIterations: 1
     EmptyCellChance: 0
     VisualInset: 0
     VisualSmoothing: 0
-  - MinSiteCount: 5
-    MaxSiteCount: 30
-    ScaleFactor: 3
+  - MinSiteCount: 3
+    MaxSiteCount: 4
+    ScaleFactor: 0.8
     LODThreshold: 300
     RenderThreshold: 800
     ValueBias: 0
@@ -320,21 +325,61 @@ MonoBehaviour:
     EmptyCellChance: 0
     VisualInset: 0
     VisualSmoothing: 0
-  ShowWireframe: 1
-  DebugLevels: 0001010000000000
-  EdgeWidth: 0.1
-  RoadWidth: 0.8
-  RoadColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  BorderColor: {r: 0, g: 0, b: 1, a: 1}
-  DrawRoads: 1
-  DrawBorders: 1
+  - MinSiteCount: 3
+    MaxSiteCount: 3
+    ScaleFactor: 1
+    LODThreshold: 100
+    RenderThreshold: 300
+    ValueBias: 0
+    ValueScale: 0.3
+    RelaxationIterations: 1
+    EmptyCellChance: 0
+    VisualInset: 0
+    VisualSmoothing: 0
+  VisualConfigs:
+  - Name: Level Settings
+    Style: 0
+    HeightScale: 50
+    BottomDepth: 50
+    TopSurfaceNoise: 0.2
+    RockLayers: 3
+    LayerInset: 0.3
+  - Name: L1 Visuals
+    Style: 0
+    HeightScale: 40
+    BottomDepth: 30
+    TopSurfaceNoise: 0.2
+    RockLayers: 3
+    LayerInset: 0.3
+  - Name: L2 Visuals
+    Style: 2
+    HeightScale: 20
+    BottomDepth: 30
+    TopSurfaceNoise: 0.2
+    RockLayers: 3
+    LayerInset: 0.5
+  - Name: L3 Visuals
+    Style: 0
+    HeightScale: 5
+    BottomDepth: 5
+    TopSurfaceNoise: 0.4
+    RockLayers: 2
+    LayerInset: 0.5
+  ShowWireframe: 0
+  DebugLevels: 00000001
+  DebugColors:
+  - {r: 0, g: 0, b: 0, a: 0}
+  - {r: 1, g: 1, b: 1, a: 0}
+  - {r: 1, g: 0, b: 0, a: 0}
+  - {r: 0, g: 1, b: 0.11449838, a: 0}
+  RenderLevels: 00000001
   oceanColor: {r: 0.1, g: 0.3, b: 0.8, a: 1}
   coastColor: {r: 0.9, g: 0.8, b: 0.6, a: 1}
   iceColor: {r: 0.8, g: 0.9, b: 1, a: 1}
   desertColor: {r: 0.9, g: 0.8, b: 0.5, a: 1}
   grasslandColor: {r: 0.3, g: 0.7, b: 0.2, a: 1}
   forestColor: {r: 0.1, g: 0.5, b: 0.1, a: 1}
-  mountainColor: {r: 0.3301887, g: 0.30604753, b: 0.28190637, a: 1}
+  mountainColor: {r: 0.5, g: 0.4, b: 0.3, a: 1}
   snowColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
 --- !u!1 &1649242809
 GameObject:
@@ -396,7 +441,7 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 99
+  far clip plane: 2000
   field of view: 60
   orthographic: 1
   orthographic size: 600

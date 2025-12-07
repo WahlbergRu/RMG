@@ -30,14 +30,28 @@ namespace VoronoiMapGen.Components
     }
 
     // Гидрология (L1-L2)
+    public enum RiverMorphology : byte
+    {
+        MountainStream, // V-образная, прямая, узкая
+        Meandering,     // Извилистая, широкая долина
+        Braided,        // Разветвленная (пока можно упростить до широкой)
+        Delta           // Устье
+    }
+
     public struct HydrologyData : IComponentData
     {
-        public int FlowTargetIndex; // Индекс соседа, куда течет вода
-        public float Flux;          // Объем воды
-        public float WaterLevel;    
-        public bool IsRiver;        
-        public bool IsLake;         
-        public bool IsOcean;        
+        public int FlowTargetIndex;
+        public float Flux;          
+        public float WaterLevel;
+        public bool IsRiver;
+        public bool IsLake;
+        public bool IsOcean;
+
+        // --- НОВЫЕ ПОЛЯ ДЛЯ АНАЛИТИКИ ---
+        public float LocalSlope;        // Уклон на этом участке (разница высот / длину)
+        public float StreamPower;       // Энергия потока = Flux * Slope
+        public RiverMorphology Type;    // Тип русла (Мезоформа)
+        public float BedResistance;     // Сопротивление дна (из Геологии L0)
     }
 
     // --- Terrain & Height Data (Добавлено) ---
@@ -91,10 +105,9 @@ namespace VoronoiMapGen.Components
         Ocean, Coast, Ice, Desert, Grassland, Forest, Mountain, Snow
     }
     
-    // Для настроек цветов в инспекторе
-    public struct BiomeColorEntry : IComponentData
+    public struct NeighborInfo : IBufferElementData // Можно использовать и в буферах
     {
-        public BiomeType biomeType;
-        public float4 color;
+        public int Index;      // Кто сосед
+        public float Distance; // Как далеко (в метрах)
     }
 }

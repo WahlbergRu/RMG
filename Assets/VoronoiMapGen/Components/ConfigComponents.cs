@@ -13,17 +13,31 @@ namespace VoronoiMapGen.Components
         public float2 MapSize;
         public int LevelsCount; 
         
+        // Переключатели
+        public bool ShowRivers;      
+        public bool ShowRiverGizmos; 
+        
+        // Маски (исправлено под раздельное управление)
+        public int RiverRenderMask;  
+        public int RiverDebugMask;   
+        
+        // Legacy Render
         public float EdgeWidth;
         public float RoadWidth;
         public Color RoadColor;
         public Color BorderColor;
-        
         public bool DrawRoads;
         public bool DrawBorders;
+        
         public bool ShowDebugWireframe; 
         public int DebugLevelMask;     
+        public int RenderLevelMask;
+        
+        public float TerrainHeightScale; 
+        public bool UseCache;
 
         public bool IsGenerated;
+        public FixedList128Bytes<float4> DebugLayerColors; 
         public FixedList512Bytes<BiomeColorEntry> BiomeColors;
     }
 
@@ -32,7 +46,10 @@ namespace VoronoiMapGen.Components
     {
         public int MinSiteCount; 
         public int MaxSiteCount; 
+        
+        // --- ИСПРАВЛЕНИЕ: Добавлено свойство ---
         public int GlobalSiteCount => MaxSiteCount; 
+        
         public float ScaleFactor;     
         public float LODThreshold;
         public float RenderThreshold;
@@ -67,7 +84,15 @@ namespace VoronoiMapGen.Components
         public int ParentIndex;
         public int ChildCount;
         public float InfluenceRadius;
+        
+        // --- ИСПРАВЛЕНИЕ: Поля возвращены ---
         public float LODThreshold;
         public float RenderThreshold;
+    }
+    
+    public struct BiomeColorEntry : IComponentData
+    {
+        public BiomeType biomeType;
+        public float4 color;
     }
 }
