@@ -1,11 +1,10 @@
 ﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
-using Unity.Rendering;
 using Unity.Transforms;
-using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Utils;
+using VoronoiMapGen.Systems.Data;
 
 namespace VoronoiMapGen.Systems
 {
@@ -13,33 +12,25 @@ namespace VoronoiMapGen.Systems
     {
         public static void CreateEntities(
             EntityManager em,
-            int level,
-            LevelSettings levelSettings,
+            MapLevelData data,
+            LevelSettings settings,
             float2 mapSize,
-            in NativeArray<float2> sites,
-            in NativeArray<VoronoiSite> siteMetadata,
-            // Данные симуляции
-            in NativeArray<TectonicPlateData> tectonicData,
-            in NativeArray<ClimateData> climateData,
-            in NativeArray<BiomeData> biomeData,
-            in NativeArray<HydrologyData> hydrologyData, 
-            // Геометрия
-            in NativeList<VoronoiCell> cells,
-            in NativeList<VoronoiEdge> edges)
+            NativeList<VoronoiEdge> edges
+            )
         {
-            int count = math.min(sites.Length, cells.Length);
-            
-            // 1. Подготовка полигонов
-            // Фильтруем ребра, чтобы оставить только те, что имеют геометрию
+            int count = data.Length;
+            int level = data.LevelIndex;
+
+            // ------------------------------------------------------------
+            // 1. ПОДГОТОВКА (Геометрия)
+            // ------------------------------------------------------------
             var polyMap = new NativeParallelMultiHashMap<int, float2>(edges.Length * 2, Allocator.Temp);
             for (int i = 0; i < edges.Length; i++)
             {
                 var edge = edges[i];
-                if (math.lengthsq(edge.VertexA) < 0.001f && math.lengthsq(edge.VertexB) < 0.001f) continue;
-
+                if (math.lengthsq(edge.VertexA) < 0.001f) continue;
                 polyMap.Add(edge.SiteA, edge.VertexA);
                 polyMap.Add(edge.SiteA, edge.VertexB);
-                
                 if (edge.SiteB != -1) 
                 {
                     polyMap.Add(edge.SiteB, edge.VertexA);
@@ -47,231 +38,167 @@ namespace VoronoiMapGen.Systems
                 }
             }
 
-            // 2. Карта Родителей (для иерархии)
+            // Карта родителей (Index -> Entity)
             NativeParallelHashMap<int, Entity> parentIndexToEntity = default;
             if (level > 0)
             {
                 parentIndexToEntity = new NativeParallelHashMap<int, Entity>(count * 2, Allocator.Temp);
-                var query = em.CreateEntityQuery(typeof(VoronoiSite), typeof(VoronoiCell));
-                var existingEntities = query.ToEntityArray(Allocator.Temp);
-                var existingSites = query.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
-
-                for (int k = 0; k < existingEntities.Length; k++)
-                {
-                    if (existingSites[k].Level == level - 1)
-                    {
-                        parentIndexToEntity.TryAdd(existingSites[k].Index, existingEntities[k]);
-                    }
-                }
-                existingEntities.Dispose();
-                existingSites.Dispose();
+                var q = em.CreateEntityQuery(typeof(VoronoiSite));
+                var ents = q.ToEntityArray(Allocator.Temp);
+                var sites = q.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
+                
+                for(int i=0; i<ents.Length; i++) 
+                    if(sites[i].Level == level - 1) parentIndexToEntity.TryAdd(sites[i].Index, ents[i]);
+                
+                ents.Dispose(); sites.Dispose();
             }
 
-            // 3. СОЗДАНИЕ СУЩНОСТЕЙ ЯЧЕЕК
-            NativeArray<Entity> siteToCellEntityMap = CreateCellEntities(
-                em, level, levelSettings, mapSize, cells, siteMetadata, 
-                tectonicData, climateData, biomeData, hydrologyData,
-                polyMap, parentIndexToEntity, count
-            );
+            // ------------------------------------------------------------
+            // 2. BATCH CREATION (МАССОВОЕ СОЗДАНИЕ ЯЧЕЕК)
+            // ------------------------------------------------------------
             
-            // 4. СОЗДАНИЕ СУЩНОСТЕЙ РЕБЕР
-            CreateEdgeEntities(em, level, edges, siteToCellEntityMap);
-
-            polyMap.Dispose();
-            if (level > 0 && parentIndexToEntity.IsCreated) parentIndexToEntity.Dispose();
-            siteToCellEntityMap.Dispose();
-            
-            em.CompleteAllTrackedJobs();
-        }
-
-        private static NativeArray<Entity> CreateCellEntities(
-            EntityManager em,
-            int level,
-            LevelSettings levelSettings,
-            float2 mapSize,
-            in NativeList<VoronoiCell> cells,
-            in NativeArray<VoronoiSite> siteMeta,
-            in NativeArray<TectonicPlateData> tectonicData,
-            in NativeArray<ClimateData> climateData,
-            in NativeArray<BiomeData> biomeData,
-            in NativeArray<HydrologyData> hydrologyData,
-            NativeParallelMultiHashMap<int, float2> polyMap,
-            NativeParallelHashMap<int, Entity> parentMap,
-            int count)
-        {
-            int maxIndex = 0;
-            for(int i=0; i<count; i++) maxIndex = math.max(maxIndex, cells[i].SiteIndex);
-            var lookupMap = new NativeArray<Entity>(maxIndex + 1, Allocator.Temp);
-
             var cellArchetype = em.CreateArchetype(
-                typeof(VoronoiCell),
-                typeof(VoronoiSite),
-                typeof(DetailLevelData),
-                typeof(LocalTransform),
-                typeof(LocalToWorld),
-                typeof(CellPolygonVertex), 
-                typeof(CellTriIndex),
-                // Все компоненты данных
-                typeof(TectonicPlateData),
-                typeof(ClimateData),
-                typeof(BiomeData),
-                typeof(CellBiome),     // <-- ВАЖНО: Используется для рендера и высоты
-                typeof(HydrologyData), 
-                typeof(CellNeighbor)   
+                typeof(VoronoiCell), typeof(VoronoiSite), typeof(DetailLevelData),
+                typeof(LocalTransform), typeof(LocalToWorld),
+                typeof(CellPolygonVertex), typeof(CellTriIndex),
+                typeof(TectonicPlateData), typeof(ClimateData), typeof(BiomeData),
+                typeof(CellBiome), typeof(HydrologyData), typeof(CellNeighbor)
             );
+
+            // Создаем ВСЕ сущности разом (1 Structural Change вместо 50,000)
+            var createdEntities = em.CreateEntity(cellArchetype, count, Allocator.Temp);
+
+            // Кэш для ребер, чтобы они знали свои Entity
+            // Используем NativeArray, так как индексы совпадают с data.Cells
+            var entityLookup = new NativeArray<Entity>(count, Allocator.Temp);
+            createdEntities.CopyTo(entityLookup);
+
+            // ------------------------------------------------------------
+            // 3. ЗАПОЛНЕНИЕ ДАННЫМИ (В цикле)
+            // ------------------------------------------------------------
+            // Теперь просто пробегаем и устанавливаем значения.
+            // Примечание: Для экстремальной оптимизации это можно вынести в IJobParallelFor
+            // (используя EntityCommandBuffer.Parallel), но даже в MainThread это будет очень быстро.
 
             for (int i = 0; i < count; i++)
             {
-                var cell = cells[i];
-                int sIdx = cell.SiteIndex;
-                if (sIdx >= siteMeta.Length) continue; 
-                
-                var meta = siteMeta[sIdx];
+                Entity e = createdEntities[i];
+                var cell = data.Cells[i];
+                var meta = data.Meta[i];
 
-                Entity parentEnt = Entity.Null;
-                if (level > 0 && parentMap.IsCreated)
+                // Связь с родителем
+                if (parentIndexToEntity.IsCreated && parentIndexToEntity.TryGetValue(meta.ParentIndex, out Entity pEnt))
                 {
-                    parentMap.TryGetValue(meta.ParentIndex, out parentEnt);
+                    cell.ParentEntity = pEnt;
                 }
-                cell.ParentEntity = parentEnt;
-
-                var e = em.CreateEntity(cellArchetype);
-
-                // Базовые компоненты
+                
+                // Основные компоненты
                 em.SetComponentData(e, cell);
                 em.SetComponentData(e, meta);
-                em.SetComponentData(e, new DetailLevelData
-                {
-                    Level = (DetailLevel)level,
-                    LODThreshold = levelSettings.LODThreshold,
-                    RenderThreshold = levelSettings.RenderThreshold,
+                em.SetComponentData(e, new DetailLevelData { 
+                    Level = (DetailLevel)level, 
+                    LODThreshold = settings.LODThreshold, 
+                    RenderThreshold = settings.RenderThreshold,
                     ParentIndex = meta.ParentIndex
                 });
-                
-                // Перенос данных симуляции
-                // Проверяем индексы, так как массивы могут быть разной длины при ошибках, но здесь должны совпадать
-                if (sIdx < tectonicData.Length) em.SetComponentData(e, tectonicData[sIdx]);
-                if (sIdx < climateData.Length) em.SetComponentData(e, climateData[sIdx]);
-                if (sIdx < biomeData.Length) em.SetComponentData(e, biomeData[sIdx]);
-                if (sIdx < hydrologyData.Length) em.SetComponentData(e, hydrologyData[sIdx]);
 
-                // *** КРИТИЧЕСКИЙ МОМЕНТ ***
-                // Заполняем CellBiome, который читают системы генерации меша!
-                if (sIdx < biomeData.Length && sIdx < climateData.Length && sIdx < tectonicData.Length)
-                {
-                    var bData = biomeData[sIdx];
-                    var cData = climateData[sIdx];
-                    var tData = tectonicData[sIdx];
-                    
-                    em.SetComponentData(e, new CellBiome
-                    {
-                        Type = bData.Type,
-                        Temperature = cData.Temperature,
-                        Moisture = cData.Moisture,
-                        Elevation = tData.BaseHeight // <-- Вот высота, которая терялась!
-                    });
-                }
-                else
-                {
-                    // Fallback, если данных нет (чтобы не было нулей)
-                    em.SetComponentData(e, new CellBiome { Type = BiomeType.Ocean, Elevation = -0.5f });
-                }
+                // Данные симуляции
+                em.SetComponentData(e, data.Tectonics[i]);
+                em.SetComponentData(e, data.Climate[i]);
+                em.SetComponentData(e, data.Hydrology[i]);
+                em.SetComponentData(e, data.Biomes[i]);
 
-                // Геометрия (Начальная позиция 0,0,0, так как меш строится в локальных координатах)
-                // Но LocalTransform должен соответствовать центроиду для правильного пивота
+                // CellBiome (для рендера)
+                em.SetComponentData(e, new CellBiome {
+                    Type = data.Biomes[i].Type,
+                    Elevation = data.Tectonics[i].BaseHeight,
+                    Temperature = data.Climate[i].Temperature,
+                    Moisture = data.Climate[i].Moisture
+                });
+
+                // Transform
                 em.SetComponentData(e, LocalTransform.FromPosition(meta.Position.x, 0, meta.Position.y));
-                
-                // Строим полигон (плоский, 3D построится в VoronoiGeometryBuildSystem)
-                BuildPolygonForCell(em, e, cell, polyMap, mapSize);
 
-                if (sIdx < lookupMap.Length) lookupMap[sIdx] = e;
+                // Геометрия (Buffer)
+                var vb = em.GetBuffer<CellPolygonVertex>(e);
+                var tb = em.GetBuffer<CellTriIndex>(e);
+                CellGeometryBuilder.BuildPolygonForCell(vb, tb, cell, polyMap, mapSize);
             }
 
-            return lookupMap;
+            // ------------------------------------------------------------
+            // 4. СОЗДАНИЕ РЕБЕР (ТОЖЕ BATCH)
+            // ------------------------------------------------------------
+            if (edges.Length > 0)
+            {
+                CreateEdgeEntitiesBatch(em, level, edges, entityLookup);
+            }
+
+            // Очистка
+            createdEntities.Dispose();
+            entityLookup.Dispose();
+            polyMap.Dispose();
+            if (parentIndexToEntity.IsCreated) parentIndexToEntity.Dispose();
         }
 
-        private static void BuildPolygonForCell(
+        private static void CreateEdgeEntitiesBatch(
             EntityManager em, 
-            Entity e, 
-            VoronoiCell cell, 
-            NativeParallelMultiHashMap<int, float2> polyMap,
-            float2 mapSize)
+            int level, 
+            NativeList<VoronoiEdge> edges, 
+            NativeArray<Entity> cellLookup)
         {
-            var uniqueVerts = new NativeList<float2>(16, Allocator.Temp);
+            // Фильтруем ребра, у которых есть длина
+            var validEdges = new NativeList<VoronoiEdge>(edges.Length, Allocator.Temp);
             
-            if (polyMap.TryGetFirstValue(cell.SiteIndex, out float2 v, out var it))
-            {
-                do
-                {
-                    bool exists = false;
-                    for (int k = 0; k < uniqueVerts.Length; k++)
-                    {
-                        if (math.distancesq(uniqueVerts[k], v) < 0.0001f) { exists = true; break; }
-                    }
-                    if (!exists) uniqueVerts.Add(v);
-                } 
-                while (polyMap.TryGetNextValue(out v, ref it));
-            }
-
-            PolygonClipper.ClipToRect(ref uniqueVerts, mapSize);
-            SortVerticesCCW(uniqueVerts, cell.Centroid);
-
-            var vertBuffer = em.GetBuffer<CellPolygonVertex>(e);
-            var triBuffer = em.GetBuffer<CellTriIndex>(e);
-            
-            CellGeometryBuilder.BuildPolygonForCell(vertBuffer, triBuffer, cell, polyMap, mapSize);
-        }
-
-        private static void SortVerticesCCW(NativeList<float2> verts, float2 center)
-        {
-            for (int i = 0; i < verts.Length - 1; i++)
-            {
-                for (int j = i + 1; j < verts.Length; j++)
-                {
-                    float angleA = math.atan2(verts[i].y - center.y, verts[i].x - center.x);
-                    float angleB = math.atan2(verts[j].y - center.y, verts[j].x - center.x);
-                    if (angleA > angleB)
-                    {
-                        var temp = verts[i];
-                        verts[i] = verts[j];
-                        verts[j] = temp;
-                    }
-                }
-            }
-        }
-
-        private static void CreateEdgeEntities(
-            EntityManager em,
-            int level,
-            in NativeList<VoronoiEdge> edges,
-            NativeArray<Entity> siteToCellMap)
-        {
-            var edgeArchetype = em.CreateArchetype(
-                typeof(VoronoiEdge),
-                typeof(DetailLevelData),
-                typeof(LocalToWorld)
-            );
-
             for (int i = 0; i < edges.Length; i++)
             {
                 var edge = edges[i];
-                if (math.lengthsq(edge.VertexA) < 0.001f && math.lengthsq(edge.VertexB) < 0.001f) continue;
+                if (math.lengthsq(edge.VertexA) > 0.001f)
+                {
+                    // Проверяем валидность индексов сразу
+                    if (edge.SiteA >= 0 && edge.SiteA < cellLookup.Length &&
+                       (edge.SiteB == -1 || (edge.SiteB >= 0 && edge.SiteB < cellLookup.Length)))
+                    {
+                        validEdges.Add(edge);
+                    }
+                }
+            }
 
-                Entity cellA = (edge.SiteA >= 0 && edge.SiteA < siteToCellMap.Length) ? siteToCellMap[edge.SiteA] : Entity.Null;
-                Entity cellB = (edge.SiteB >= 0 && edge.SiteB < siteToCellMap.Length) ? siteToCellMap[edge.SiteB] : Entity.Null;
+            if (validEdges.Length == 0) 
+            {
+                validEdges.Dispose();
+                return;
+            }
 
-                if (cellA == Entity.Null && cellB == Entity.Null) continue;
+            // Пакетное создание сущностей ребер
+            var edgeArchetype = em.CreateArchetype(
+                typeof(VoronoiEdge), 
+                typeof(DetailLevelData), 
+                typeof(LocalToWorld)
+            );
+            
+            // Если уровень высокий - это дороги, добавляем тег
+            if (level >= 4) 
+                edgeArchetype = em.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld), typeof(RoadEntityTag));
+            else 
+                edgeArchetype = em.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld), typeof(BorderEntityTag));
 
-                var e = em.CreateEntity(edgeArchetype);
-                edge.CellA = cellA;
-                edge.CellB = cellB;
+            var edgeEntities = em.CreateEntity(edgeArchetype, validEdges.Length, Allocator.Temp);
+
+            // Заполнение данных
+            for (int i = 0; i < validEdges.Length; i++)
+            {
+                var edge = validEdges[i];
+                Entity e = edgeEntities[i];
+
+                edge.CellA = cellLookup[edge.SiteA];
+                edge.CellB = (edge.SiteB >= 0) ? cellLookup[edge.SiteB] : Entity.Null;
 
                 em.SetComponentData(e, edge);
                 em.SetComponentData(e, new DetailLevelData { Level = (DetailLevel)level });
-                
-                if (level >= 4) em.AddComponent<RoadEntityTag>(e);
-                else em.AddComponent<BorderEntityTag>(e);
             }
+
+            edgeEntities.Dispose();
+            validEdges.Dispose();
         }
     }
 }

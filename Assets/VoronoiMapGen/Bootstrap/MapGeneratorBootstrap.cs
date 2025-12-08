@@ -16,16 +16,24 @@ namespace VoronoiMapGen.Bootstrap
         public float HeightScale = 50.0f;
         public float BottomDepth = 30.0f; 
         [Range(0f, 2f)] public float TopSurfaceNoise = 0.2f;
+        
         [Header("Stratified Settings")]
         [Range(1, 10)] public int RockLayers = 3;
         [Range(0f, 2f)] public float LayerInset = 0.3f;
-        
-        // --- НОВЫЕ НАСТРОЙКИ (ПОЯВЯТСЯ В ИНСПЕКТОРЕ) ---
+
+        // --- НОВЫЕ ПАРАМЕТРЫ РЕК ---
         [Header("River Visuals")]
+        [Tooltip("Множитель ширины реки")]
         [Range(0.1f, 5f)] public float RiverWidthMultiplier = 1.0f;
-        [Range(0f, 20f)]  public float MeanderAmp = 2.0f;  // Сила изгиба
-        [Range(0.001f, 0.5f)] public float MeanderFreq = 0.02f; // Частота изгиба
-        [Range(0f, 5f)]   public float NoiseInfluence = 1.0f;   // Хаотичность
+        
+        [Tooltip("Амплитуда изгибов (змейка)")]
+        [Range(0f, 20f)]  public float MeanderAmp = 2.0f;  
+        
+        [Tooltip("Частота изгибов (как часто петляет)")]
+        [Range(0.001f, 0.5f)] public float MeanderFreq = 0.02f; 
+        
+        [Tooltip("Влияние случайного шума на русло")]
+        [Range(0f, 5f)]   public float NoiseInfluence = 1.0f;   
     }
 
     public class MapGeneratorBootstrap : MonoBehaviour
@@ -39,11 +47,12 @@ namespace VoronoiMapGen.Bootstrap
         // --- RIVERS SETTINGS ---
         public bool ShowRivers = true;
         public bool[] RiverRenderLevels = new bool[4]; 
-
         public bool ShowRiverGizmos = false;
         public bool[] RiverDebugLevels = new bool[4]; 
 
-        [Header("Level Configurations")] 
+        [Header("Level Configurations")]
+        // Галочка для автоматического переключения уровней камерой
+        public bool UseAutoLOD = true; 
         public LevelSettings[] LevelConfigs = new LevelSettings[1]; 
         
         [Header("Visual Styles Per Level")]
@@ -52,6 +61,7 @@ namespace VoronoiMapGen.Bootstrap
         public bool ShowWireframe = false;
         public bool[] DebugLevels = new bool[4]; 
         public Color[] DebugColors = new Color[4];
+        
         public bool[] RenderLevels = new bool[4];
 
         [HideInInspector] public Color oceanColor = new Color(0.1f, 0.3f, 0.8f, 1);
@@ -69,34 +79,42 @@ namespace VoronoiMapGen.Bootstrap
             if (world == null) return;
             var em = world.EntityManager;
 
+            // Завершаем все джобы перед структурными изменениями
+            em.CompleteAllTrackedJobs();
+
             UpdateSettingsToECS(em);
 
+            // 1. Удаляем реки (RiverChunkTag)
             var chunkRiverQuery = em.CreateEntityQuery(typeof(RiverChunkTag));
             if (!chunkRiverQuery.IsEmpty) em.DestroyEntity(chunkRiverQuery);
 
             var oldRiverQuery = em.CreateEntityQuery(typeof(RiverSegmentOwner));
             if (!oldRiverQuery.IsEmpty) em.DestroyEntity(oldRiverQuery);
 
+            // 2. Очищаем компоненты рендеринга с ячеек террейна
+            // Удаляем всё, включая RenderMeshArray, чтобы избежать утечек и крашей
             var cellQuery = em.CreateEntityQuery(typeof(VoronoiCell), typeof(VoronoiCellMeshTag));
             if (!cellQuery.IsEmpty)
             {
                 em.RemoveComponent<VoronoiCellMeshTag>(cellQuery);
                 em.RemoveComponent<MaterialMeshInfo>(cellQuery);
                 em.RemoveComponent<RenderMeshUnmanaged>(cellQuery);
+                em.RemoveComponent<RenderMeshArray>(cellQuery); 
                 em.RemoveComponent<RenderBounds>(cellQuery);
                 em.RemoveComponent<WorldRenderBounds>(cellQuery);
                 em.RemoveComponent<URPMaterialPropertyBaseColor>(cellQuery); 
             }
-            
-            // Здесь безопасно просто пнуть системы, они сами решат как очиститься (отложенно)
-            // Но в Bootstrap вызываем через флаги или позволяем системе обновиться самой.
-            // Старый код прямо вызывал CleanupResources() с DestroyImmediate, что приводило к крашу.
-            
-            var meshSystem = world.GetExistingSystemManaged<VoronoiMapGen.Systems.VoronoiMeshCreateSystem>();
-            if (meshSystem != null) meshSystem.CleanupResources(false); // <-- Безопасно
+
+            // 3. Вызываем безопасную очистку в системах
+            // В Play Mode передаем false (не immediate), в Edit Mode - true (удалять сразу)
+            bool immediate = !Application.isPlaying;
+
+            // Используем TryGet, так как системы могут быть еще не созданы
+            var meshSystem = world.GetExistingSystemManaged<VoronoiMapGen.Systems.Rendering.VoronoiMeshCreateSystem>();
+            if (meshSystem != null) meshSystem.CleanupResources(immediate);
 
             var riverSystem = world.GetExistingSystemManaged<VoronoiMapGen.Systems.Rendering.RiverRenderingSystem>();
-            if (riverSystem != null) riverSystem.CleanupResources(false); // <-- Безопасно
+            if (riverSystem != null) riverSystem.CleanupResources(immediate);
         }
 
         public void UpdateSettingsToECS(EntityManager em)
@@ -107,10 +125,20 @@ namespace VoronoiMapGen.Bootstrap
             var entity = query.GetSingletonEntity();
             var currentData = em.GetComponentData<MapSettings>(entity);
             
-            currentData.RenderLevelMask = CalculateMask(RenderLevels);
+            // --- ЛОГИКА AUTO LOD ---
+            currentData.UseAutoLOD = UseAutoLOD;
+
+            // Если AutoLOD включен, мы НЕ перезаписываем маски из инспектора,
+            // их контролирует LODUpdateSystem в рантайме.
+            if (!UseAutoLOD)
+            {
+                currentData.RenderLevelMask = CalculateMask(RenderLevels);
+                currentData.RiverRenderMask = CalculateMask(RiverRenderLevels);
+            }
+            
+            // Маски отладки обновляем всегда
             currentData.DebugLevelMask = CalculateMask(DebugLevels);
-            currentData.RiverRenderMask = CalculateMask(RiverRenderLevels);
-            currentData.RiverDebugMask = CalculateMask(RiverDebugLevels);
+            currentData.RiverDebugMask = CalculateMask(RiverDebugLevels);   
 
             currentData.ShowDebugWireframe = ShowWireframe;
             currentData.TerrainHeightScale = TerrainHeightScale; 
@@ -134,10 +162,15 @@ namespace VoronoiMapGen.Bootstrap
                     var s = VisualConfigs[i];
                     buf[i] = new TerrainVisualData
                     {
-                        Style = s.Style, HeightScale = s.HeightScale, BottomDepth = s.BottomDepth,
-                        TopNoiseAmplitude = s.TopSurfaceNoise, StrataCount = s.RockLayers, StrataInset = s.LayerInset, StrataJitter = 0.1f,
+                        Style = s.Style, 
+                        HeightScale = s.HeightScale, 
+                        BottomDepth = s.BottomDepth,
+                        TopNoiseAmplitude = s.TopSurfaceNoise, 
+                        StrataCount = s.RockLayers, 
+                        StrataInset = s.LayerInset, 
+                        StrataJitter = 0.1f,
                         
-                        // ПЕРЕНОСИМ НОВЫЕ ПАРАМЕТРЫ
+                        // Заполняем новые параметры рек
                         RiverWidthScale = s.RiverWidthMultiplier,
                         RiverMeanderAmplitude = s.MeanderAmp,
                         RiverMeanderFrequency = s.MeanderFreq,
@@ -151,6 +184,7 @@ namespace VoronoiMapGen.Bootstrap
         {
             int targetLen = LevelConfigs.Length;
             if (targetLen == 0) return;
+
             if (VisualConfigs.Length != targetLen) ResizeArray(ref VisualConfigs, targetLen, new VisualLevelSettings());
             if (DebugLevels.Length != targetLen) ResizeArray(ref DebugLevels, targetLen, true);
             if (RenderLevels.Length != targetLen) ResizeArray(ref RenderLevels, targetLen, true);
@@ -182,6 +216,7 @@ namespace VoronoiMapGen.Bootstrap
             var mapSettings = new MapSettings {
                 Seed = Seed, MapSize = MapSize, LevelsCount = LevelConfigs.Length, TerrainHeightScale = TerrainHeightScale,
                 UseCache = UseCache, 
+                UseAutoLOD = UseAutoLOD, // <-- Инициализация
                 
                 ShowDebugWireframe = ShowWireframe, 
                 ShowRivers = ShowRivers, 
@@ -218,7 +253,7 @@ namespace VoronoiMapGen.Bootstrap
                 visBuf.Add(new TerrainVisualData {
                     Style = s.Style, HeightScale = s.HeightScale, BottomDepth = s.BottomDepth,
                     TopNoiseAmplitude = s.TopSurfaceNoise, StrataCount = s.RockLayers, StrataInset = s.LayerInset, StrataJitter = 0.1f,
-                    // Инициализация новых параметров
+                    
                     RiverWidthScale = s.RiverWidthMultiplier,
                     RiverMeanderAmplitude = s.MeanderAmp,
                     RiverMeanderFrequency = s.MeanderFreq,

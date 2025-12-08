@@ -1,104 +1,72 @@
 ﻿using Unity.Collections;
-using Unity.Mathematics;
 using VoronoiMapGen.Components;
 
 namespace VoronoiMapGen.Systems.Data
 {
-    /// <summary>
-    /// Исправленная версия: теперь создает глубокие копии для Sites и Meta,
-    /// чтобы избежать Dispose() в вызывающей системе.
-    /// </summary>
     public class MapHistoryData
     {
-        public NativeArray<VoronoiCell>[] Cells;
-        public NativeArray<float2>[] Sites;
-        public NativeArray<VoronoiSite>[] Meta;
-        public NativeArray<HydrologyData>[] Hydrology;
-        public NativeArray<TectonicPlateData>[] Tectonics;
-        public NativeArray<ClimateData>[] Climate;
-
-        private int _levelsCount;
+        // Храним только массив структур данных
+        private MapLevelData[] _levels;
 
         public MapHistoryData(int levelsCount)
         {
-            _levelsCount = levelsCount;
-            Cells = new NativeArray<VoronoiCell>[_levelsCount];
-            Sites = new NativeArray<float2>[_levelsCount];
-            Meta = new NativeArray<VoronoiSite>[_levelsCount];
-            Hydrology = new NativeArray<HydrologyData>[_levelsCount];
-            Tectonics = new NativeArray<TectonicPlateData>[_levelsCount];
-            Climate = new NativeArray<ClimateData>[_levelsCount];
+            _levels = new MapLevelData[levelsCount];
         }
 
-        public void StoreLevel(int level, 
-            NativeArray<float2> sites, 
-            NativeArray<VoronoiSite> meta, 
-            NativeList<VoronoiCell> cellsList,
-            NativeArray<TectonicPlateData> tectonics,
-            NativeArray<ClimateData> climate,
-            NativeArray<HydrologyData> hydro)
+        public void StoreLevel(MapLevelData data)
         {
-            // === ИСПРАВЛЕНИЕ: ДЕЛАЕМ КОПИИ МАССИВОВ ===
-            // Раньше тут было Sites[level] = sites, что сохраняло ссылку, 
-            // которая потом уничтожалась системой.
+            int lvl = data.LevelIndex;
+            // Освобождаем старое, если было (на всякий случай)
+            if (_levels[lvl].IsCreated) _levels[lvl].Dispose();
+
+            // === DEEP COPY (Глубокое копирование) ===
+            // Мы обязаны скопировать данные, так как исходные массивы могут быть
+            // помечены как TempJob/Persistent и удалены в вызывающем коде.
             
-            CopyArray(ref Sites[level], sites);
-            CopyArray(ref Meta[level], meta);
-            CopyArray(ref Tectonics[level], tectonics);
-            CopyArray(ref Climate[level], climate);
-            CopyArray(ref Hydrology[level], hydro);
+            var stored = new MapLevelData
+            {
+                LevelIndex = lvl,
+                Sites = Copy(data.Sites),
+                Meta = Copy(data.Meta),
+                Cells = Copy(data.Cells),
+                // Edges часто огромные, их можно не хранить в истории, если они нужны только для ECS создания
+                // Но если нужны для логики - копируй. Допустим, не нужны для генерации детей.
+                
+                Tectonics = Copy(data.Tectonics),
+                Climate = Copy(data.Climate),
+                Hydrology = Copy(data.Hydrology),
+                Biomes = Copy(data.Biomes) // Если биомы нужны детям
+            };
 
-            // Cells приходят в виде List, копируем вручную
-            if (Cells[level].IsCreated) Cells[level].Dispose();
-            Cells[level] = new NativeArray<VoronoiCell>(cellsList.Length, Allocator.Persistent);
-            Cells[level].CopyFrom(cellsList.AsArray());
+            _levels[lvl] = stored;
         }
 
-        // Генерик-хелпер для безопасного копирования
-        private void CopyArray<T>(ref NativeArray<T> destination, NativeArray<T> source) where T : struct
+        public bool TryGetLevel(int level, out MapLevelData data)
         {
-            if (destination.IsCreated) destination.Dispose();
-            destination = new NativeArray<T>(source.Length, Allocator.Persistent);
-            destination.CopyFrom(source);
+            data = default;
+            if (level < 0 || level >= _levels.Length) return false;
+            if (!_levels[level].IsCreated) return false;
+
+            data = _levels[level];
+            return true;
         }
 
         public void Dispose()
         {
-            for (int i = 0; i < _levelsCount; i++)
+            if (_levels == null) return;
+            for (int i = 0; i < _levels.Length; i++)
             {
-                if (Cells[i].IsCreated) Cells[i].Dispose();
-                if (Sites[i].IsCreated) Sites[i].Dispose();
-                if (Meta[i].IsCreated) Meta[i].Dispose();
-                if (Hydrology[i].IsCreated) Hydrology[i].Dispose();
-                if (Tectonics[i].IsCreated) Tectonics[i].Dispose();
-                if (Climate[i].IsCreated) Climate[i].Dispose();
+                _levels[i].Dispose();
             }
         }
-        
-        public bool TryGetPreviousLevel(int currentLevel, 
-            out NativeArray<VoronoiCell> pCells, 
-            out NativeArray<float2> pSites,
-            out NativeArray<VoronoiSite> pMeta,
-            out NativeArray<HydrologyData> pHydro,
-            out NativeArray<TectonicPlateData> pTect,
-            out NativeArray<ClimateData> pClim)
+
+        // Хелпер копирования
+        private NativeArray<T> Copy<T>(NativeArray<T> source) where T : struct
         {
-            pCells = default; pSites = default; pMeta = default;
-            pHydro = default; pTect = default; pClim = default;
-
-            if (currentLevel <= 0) return false;
-            int prev = currentLevel - 1;
-
-            // Проверка, что предыдущий уровень вообще существует
-            if (!Cells[prev].IsCreated || !Sites[prev].IsCreated || !Meta[prev].IsCreated) return false;
-
-            pCells = Cells[prev];
-            pSites = Sites[prev];
-            pMeta = Meta[prev];
-            pHydro = Hydrology[prev];
-            pTect = Tectonics[prev];
-            pClim = Climate[prev];
-            return true;
+            if (!source.IsCreated) return default;
+            var newArr = new NativeArray<T>(source.Length, Allocator.Persistent);
+            newArr.CopyFrom(source);
+            return newArr;
         }
     }
 }

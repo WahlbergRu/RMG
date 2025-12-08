@@ -284,19 +284,31 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ee6f5765c0ed124283575f081ffa107, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Seed: 12366
+  Seed: 12368
   UseCache: 0
   MapSize: {x: 1000, y: 1000}
-  TerrainHeightScale: 50
+  TerrainHeightScale: 500
+  Tectonics:
+    SizeRatio: 0.45
+    EdgeFalloff: 1.5
+    HeightDrop: 0.3
+    Frequency: 0.0012
+    Sharpness: 2.5
+    Amplitude: 0.9
+    ValleyFreq: 0.002
+    ValleyTightness: 5
+    CarveDepth: 0.5
+    MinHeightToCarve: 0.15
   ShowRivers: 1
+  RiverRenderLevels: 00010101
   ShowRiverGizmos: 1
-  RiverLevels: 00000000
+  RiverDebugLevels: 00000000
   LevelConfigs:
-  - MinSiteCount: 15
-    MaxSiteCount: 20
+  - MinSiteCount: 35
+    MaxSiteCount: 45
     ScaleFactor: 1
-    LODThreshold: 2000
-    RenderThreshold: 5000
+    LODThreshold: 1200
+    RenderThreshold: 1200
     ValueBias: 0
     ValueScale: 0.1
     RelaxationIterations: 5
@@ -306,8 +318,8 @@ MonoBehaviour:
   - MinSiteCount: 11
     MaxSiteCount: 15
     ScaleFactor: 1
-    LODThreshold: 1000
-    RenderThreshold: 2000
+    LODThreshold: 800
+    RenderThreshold: 800
     ValueBias: 0
     ValueScale: 0.2
     RelaxationIterations: 1
@@ -317,19 +329,19 @@ MonoBehaviour:
   - MinSiteCount: 3
     MaxSiteCount: 4
     ScaleFactor: 0.8
-    LODThreshold: 300
-    RenderThreshold: 800
+    LODThreshold: 500
+    RenderThreshold: 500
     ValueBias: 0
     ValueScale: 0.3
     RelaxationIterations: 1
     EmptyCellChance: 0
     VisualInset: 0
     VisualSmoothing: 0
-  - MinSiteCount: 3
-    MaxSiteCount: 3
+  - MinSiteCount: 5
+    MaxSiteCount: 6
     ScaleFactor: 1
-    LODThreshold: 100
-    RenderThreshold: 300
+    LODThreshold: 200
+    RenderThreshold: 200
     ValueBias: 0
     ValueScale: 0.3
     RelaxationIterations: 1
@@ -339,32 +351,48 @@ MonoBehaviour:
   VisualConfigs:
   - Name: Level Settings
     Style: 0
-    HeightScale: 50
-    BottomDepth: 50
+    HeightScale: 20
+    BottomDepth: 0
     TopSurfaceNoise: 0.2
     RockLayers: 3
     LayerInset: 0.3
+    RiverWidthMultiplier: 1
+    MeanderAmp: 2
+    MeanderFreq: 0.02
+    NoiseInfluence: 1
   - Name: L1 Visuals
     Style: 0
-    HeightScale: 40
-    BottomDepth: 30
+    HeightScale: 20
+    BottomDepth: 0
     TopSurfaceNoise: 0.2
     RockLayers: 3
     LayerInset: 0.3
+    RiverWidthMultiplier: 1
+    MeanderAmp: 2
+    MeanderFreq: 0.02
+    NoiseInfluence: 1
   - Name: L2 Visuals
     Style: 2
     HeightScale: 20
-    BottomDepth: 30
+    BottomDepth: 0
     TopSurfaceNoise: 0.2
     RockLayers: 3
     LayerInset: 0.5
+    RiverWidthMultiplier: 1
+    MeanderAmp: 2
+    MeanderFreq: 0.02
+    NoiseInfluence: 1
   - Name: L3 Visuals
     Style: 0
-    HeightScale: 5
-    BottomDepth: 5
+    HeightScale: 20
+    BottomDepth: 0
     TopSurfaceNoise: 0.4
     RockLayers: 2
     LayerInset: 0.5
+    RiverWidthMultiplier: 1
+    MeanderAmp: 2
+    MeanderFreq: 0.02
+    NoiseInfluence: 1
   ShowWireframe: 0
   DebugLevels: 00000001
   DebugColors:
@@ -531,11 +559,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fb957e2b9689474795ee658aa3da7f41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  TargetCamera: {fileID: 0}
+  TargetCamera: {fileID: 1649242811}
+  Mode: 0
   PanSpeed: 50
   ZoomSpeed: 300
-  MinHeight: -200
-  MaxHeight: 1000
+  RotateSpeed: 150
+  InvertZoom: 0
+  InvertPan: 0
+  MinZoom: 20
+  MaxZoom: 1500
   Smoothness: 7.43
 --- !u!1660057539 &9223372036854775807
 SceneRoots:

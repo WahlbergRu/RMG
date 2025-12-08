@@ -8,20 +8,24 @@ namespace VoronoiMapGen.Bootstrap
     public class MapCameraBootstrap : MonoBehaviour
     {
         [Header("References")]
-        public Camera TargetCamera; // Ссылка на камеру, чтобы определять режим (Ortho/Perspective)
+        public Camera TargetCamera;
 
-        [Header("Camera Controls")]
+        [Header("Mode")]
+        public CameraMode Mode = CameraMode.Free;
+
+        [Header("Controls")]
         public float PanSpeed = 50f;
         public float ZoomSpeed = 100f;
+        public float RotateSpeed = 150f;
+        public bool InvertZoom = false;
+        public bool InvertPan = false;
         
-        [Tooltip("Для Perspective: Высота (Y).\nДля Orthographic: Размер (Size).")]
-        public float MinHeight = 20f;   
-        
-        [Tooltip("Для Perspective: Высота (Y).\nДля Orthographic: Размер (Size).")]
-        public float MaxHeight = 1500f; 
+        [Header("Limits")]
+        public float MinZoom = 20f;   
+        public float MaxZoom = 1500f; 
         
         [Range(1f, 20f)]
-        public float Smoothness = 5f;
+        public float Smoothness = 10f;
 
         private Entity _cameraEntity;
         private EntityManager _entityManager;
@@ -34,23 +38,45 @@ namespace VoronoiMapGen.Bootstrap
             var world = World.DefaultGameObjectInjectionWorld;
             _entityManager = world.EntityManager;
 
-            // Создаем сущность
             _cameraEntity = _entityManager.CreateEntity();
             _entityManager.SetName(_cameraEntity, "CameraController");
 
-            // Инициализируем начальными данными
+            // Рассчитываем начальную точку фокуса (бросаем луч в центр экрана)
+            float3 startFocus = float3.zero;
+            float startZoom = 500f;
+            float startPitch = 60f;
+            float startYaw = 0f;
+
+            // Пытаемся найти точку на земле, куда смотрит камера
+            Ray ray = new Ray(TargetCamera.transform.position, TargetCamera.transform.forward);
+            if (new Plane(Vector3.up, 0).Raycast(ray, out float enter))
+            {
+                Vector3 hitPoint = ray.GetPoint(enter);
+                startFocus = new float3(hitPoint.x, 0, hitPoint.z);
+                startZoom = Vector3.Distance(TargetCamera.transform.position, hitPoint);
+            }
+            
+            // Если режим Изометрия или 2D - форсируем начальные углы
+            if (Mode == CameraMode.TopDown2D) { startPitch = 90f; startYaw = 0f; }
+            if (Mode == CameraMode.Isometric) { startPitch = 45f; startYaw = 45f; }
+
             _entityManager.AddComponentData(_cameraEntity, new CameraSettingsData
             {
+                Mode = Mode,
                 PanSpeed = PanSpeed,
                 ZoomSpeed = ZoomSpeed,
-                MinHeight = MinHeight,
-                MaxHeight = MaxHeight,
+                RotateSpeed = RotateSpeed,
+                MinZoom = MinZoom,
+                MaxZoom = MaxZoom,
                 Smoothing = Smoothness,
-                TargetPosition = float3.zero, 
+                InvertZoom = InvertZoom,
+                InvertPan = InvertPan,
+                
+                TargetFocusPoint = new float3(startFocus.x, startZoom, startFocus.z), // Y хранит Zoom
+                TargetYaw = startYaw,
+                TargetPitch = startPitch,
+                
                 IsInitialized = false
-                // Если в вашей структуре CameraSettingsData есть поле типа IsOrthographic, 
-                // добавьте его инициализацию здесь:
-                // IsOrthographic = TargetCamera.orthographic
             });
 
             _isInitialized = true;
@@ -58,23 +84,21 @@ namespace VoronoiMapGen.Bootstrap
 
         void Update()
         {
-            // Если сущность еще не создана или была уничтожена, выходим
             if (!_isInitialized || !_entityManager.Exists(_cameraEntity)) return;
 
-            // 1. Получаем ТЕКУЩИЕ данные из ECS (чтобы сохранить TargetPosition, который меняет Система)
             var currentData = _entityManager.GetComponentData<CameraSettingsData>(_cameraEntity);
 
-            // 2. Обновляем только настроечные параметры из Инспектора (Live Link)
+            // Live Update настроек
+            currentData.Mode = Mode;
             currentData.PanSpeed = PanSpeed;
             currentData.ZoomSpeed = ZoomSpeed;
-            currentData.MinHeight = MinHeight;
-            currentData.MaxHeight = MaxHeight;
+            currentData.RotateSpeed = RotateSpeed;
+            currentData.MinZoom = MinZoom;
+            currentData.MaxZoom = MaxZoom;
             currentData.Smoothing = Smoothness;
+            currentData.InvertZoom = InvertZoom;
+            currentData.InvertPan = InvertPan;
 
-            // Опционально: если вы добавите поле IsOrthographic в компонент данных, обновляйте его тут:
-            // currentData.IsOrthographic = TargetCamera != null && TargetCamera.orthographic;
-
-            // 3. Записываем обновленные данные обратно в ECS
             _entityManager.SetComponentData(_cameraEntity, currentData);
         }
     }

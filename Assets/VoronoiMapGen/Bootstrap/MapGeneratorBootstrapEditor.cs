@@ -2,7 +2,7 @@
 using UnityEngine;
 using VoronoiMapGen.Bootstrap;
 
-namespace VoronoiMapGen.Editor
+namespace VoronoiMapGen.Bootstrap
 {
     [CustomEditor(typeof(MapGeneratorBootstrap))]
     public class MapGeneratorBootstrapEditor : UnityEditor.Editor
@@ -15,7 +15,8 @@ namespace VoronoiMapGen.Editor
         
         // Configuration
         private SerializedProperty levelConfigsProp;
-        private SerializedProperty visualConfigsProp; // <-- Внутри этого массива будут видны новые настройки рек
+        private SerializedProperty visualConfigsProp;
+        private SerializedProperty useAutoLodProp; // <-- Новая галочка
         
         // Rendering & Rivers
         private SerializedProperty showRiversProp;        
@@ -46,6 +47,7 @@ namespace VoronoiMapGen.Editor
             // Logic & Styles
             levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
             visualConfigsProp = serializedObject.FindProperty("VisualConfigs");
+            useAutoLodProp = serializedObject.FindProperty("UseAutoLOD"); // <-- Связываем
 
             // Render
             showRiversProp = serializedObject.FindProperty("ShowRivers");
@@ -102,24 +104,34 @@ namespace VoronoiMapGen.Editor
             }
             EditorGUILayout.EndVertical();
 
-            if (levelConfigsProp != null && visualConfigsProp != null)
+            DrawHeader("CONFIGURATIONS");
+            
+            // Галочка Авто-ЛOД (Важно)
+            EditorGUILayout.PropertyField(useAutoLodProp);
+            if (useAutoLodProp.boolValue)
             {
-                DrawHeader("CONFIGURATIONS");
-                
+                EditorGUILayout.HelpBox("LOD is managed by Camera Height (System driven). Manual layer controls are disabled.", MessageType.Info);
+            }
+
+            if (levelConfigsProp != null)
+            {
                 levelConfigsProp.isExpanded = EditorGUILayout.Foldout(levelConfigsProp.isExpanded, $"Logic Rules (Count: {levelConfigsProp.arraySize})", true);
                 if (levelConfigsProp.isExpanded) 
                 {
                     EditorGUI.indentLevel++;
-                    EditorGUILayout.PropertyField(levelConfigsProp, true); // true = показывать детей (массив)
+                    // true = показывать детей (чтобы видеть поле LOD Threshold)
+                    EditorGUILayout.PropertyField(levelConfigsProp, true); 
                     EditorGUI.indentLevel--;
                 }
-                
-                // Здесь будут отображаться настройки уровней, включая новые параметры рек (VisualLevelSettings)
+            }
+            
+            if (visualConfigsProp != null)
+            {
                 visualConfigsProp.isExpanded = EditorGUILayout.Foldout(visualConfigsProp.isExpanded, $"Visual Styles (Count: {visualConfigsProp.arraySize})", true);
                 if (visualConfigsProp.isExpanded) 
                 {
                     EditorGUI.indentLevel++;
-                    EditorGUILayout.PropertyField(visualConfigsProp, true); // true гарантирует, что мы увидим ползунки River
+                    EditorGUILayout.PropertyField(visualConfigsProp, true); 
                     EditorGUI.indentLevel--;
                 }
             }
@@ -127,25 +139,31 @@ namespace VoronoiMapGen.Editor
             DrawHeader("RENDER VISIBILITY");
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                EditorGUILayout.LabelField("Terrain Meshes", EditorStyles.miniBoldLabel);
-                DrawCompactLevelMask(renderLevelsProp, "Terrain Layers");
-                
-                EditorGUILayout.Space(6);
-
-                EditorGUILayout.LabelField("River Meshes", EditorStyles.miniBoldLabel);
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(showRiversProp, new GUIContent("Enable Generation"));
-                EditorGUILayout.EndHorizontal();
-
-                if (showRiversProp.boolValue)
+                // Если AutoLOD включен, блокируем ручной выбор уровней, чтобы не путать
+                EditorGUI.BeginDisabledGroup(useAutoLodProp.boolValue);
                 {
-                    EditorGUI.indentLevel++;
-                    DrawCompactLevelMask(riverRenderLevelsProp, "River Layers");
-                    EditorGUI.indentLevel--;
+                    EditorGUILayout.LabelField("Terrain Meshes", EditorStyles.miniBoldLabel);
+                    DrawCompactLevelMask(renderLevelsProp, "Terrain Layers");
+                    
+                    EditorGUILayout.Space(6);
+
+                    EditorGUILayout.LabelField("River Meshes", EditorStyles.miniBoldLabel);
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.PropertyField(showRiversProp, new GUIContent("Enable Generation"));
+                    EditorGUILayout.EndHorizontal();
+
+                    if (showRiversProp.boolValue)
+                    {
+                        EditorGUI.indentLevel++;
+                        DrawCompactLevelMask(riverRenderLevelsProp, "River Layers");
+                        EditorGUI.indentLevel--;
+                    }
                 }
+                EditorGUI.EndDisabledGroup();
             }
             EditorGUILayout.EndVertical();
 
+            // Если были изменения -> ребилд
             if (EditorGUI.EndChangeCheck())
             {
                 serializedObject.ApplyModifiedProperties(); 
@@ -158,6 +176,7 @@ namespace VoronoiMapGen.Editor
             DrawHeader("DEBUG TOOLS (Scene View)");
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
+                // Grid
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.PropertyField(showWireframeProp, new GUIContent("Show Terrain Grid"));
                 EditorGUILayout.EndHorizontal();
@@ -173,6 +192,7 @@ namespace VoronoiMapGen.Editor
 
                 EditorGUILayout.Space(6);
 
+                // River Graph
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.PropertyField(showRiverGizmosProp, new GUIContent("Show River Graph"));
                 EditorGUILayout.EndHorizontal();

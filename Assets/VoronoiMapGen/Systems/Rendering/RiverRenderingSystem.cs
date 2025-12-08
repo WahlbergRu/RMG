@@ -1,100 +1,127 @@
 ﻿using Unity.Entities;
 using Unity.Collections;
+using Unity.Mathematics;
+using Unity.Rendering; // Нужен для RenderBounds, RenderMeshArray и т.д.
+using Unity.Transforms; // Нужен для LocalToWorld
 using UnityEngine;
 using VoronoiMapGen.Components;
-using VoronoiMapGen.Utils;
-using System.Collections.Generic;
+using VoronoiMapGen.Utils; // Для UnifiedResourceManager
+using VoronoiMapGen.Systems.Rendering.Rivers; 
 
 namespace VoronoiMapGen.Systems.Rendering
 {
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    [UpdateAfter(typeof(VoronoiMeshCreateSystem))] 
     public partial class RiverRenderingSystem : SystemBase
     {
-        private Material _riverMaterial;
-        private List<Mesh> _createdMeshes = new List<Mesh>();
-
         private int _lastRiverMask = -1;
         private int _lastTerrainMask = -1;
         private bool _lastShowRivers = false;
 
         protected override void OnCreate()
         {
-            var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"); 
-            if (shader == null) shader = Shader.Find("Hidden/Internal-ErrorShader");
-
-            _riverMaterial = new Material(shader);
-            _riverMaterial.color = new Color(0.0f, 0.5f, 1.0f, 0.8f); 
-            _riverMaterial.SetFloat("_Smoothness", 0.9f);
-            _riverMaterial.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off); 
-            _riverMaterial.enableInstancing = true;
-            
             RequireForUpdate<GeometryBuiltTag>();
             RequireForUpdate<MapGeneratedTag>();
+            
+            // Включаем Unified System (если она работает по этому тегу)
+            var entity = EntityManager.CreateEntity(typeof(UnifiedRenderTag)); 
+        }
+
+        // Этот метод нужен для совместимости с Bootstrap, который может его дергать
+        public void CleanupResources(bool unused = false)
+        {
+            var q = EntityManager.CreateEntityQuery(typeof(RiverChunkTag));
+            if (!q.IsEmpty) EntityManager.DestroyEntity(q);
         }
 
         protected override void OnDestroy()
         {
-            // При закрытии удаляем мгновенно
-            CleanupResources(immediate: true);
-            if (_riverMaterial != null) Object.DestroyImmediate(_riverMaterial);
-        }
-
-        // --- ИСПРАВЛЕНИЕ: БЕЗОПАСНАЯ ОЧИСТКА ---
-        public void CleanupResources(bool immediate = false)
-        {
-            foreach (var m in _createdMeshes) {
-                if (m != null) 
-                {
-                    if (immediate) Object.DestroyImmediate(m);
-                    else Object.Destroy(m); // Отложенное удаление (Play Mode)
-                }
-            }
-            _createdMeshes.Clear();
+            CleanupResources();
         }
 
         protected override void OnUpdate()
         {
             if (!SystemAPI.TryGetSingleton<MapSettings>(out var settings)) return;
 
-            // Проверяем изменения настроек (маски слоев или вкл/выкл)
-            bool settingsChanged = (settings.RiverRenderMask != _lastRiverMask) ||
-                                   (settings.RenderLevelMask != _lastTerrainMask) ||
-                                   (settings.ShowRivers != _lastShowRivers);
+            bool changed = (settings.RiverRenderMask != _lastRiverMask) ||
+                           (settings.RenderLevelMask != _lastTerrainMask) ||
+                           (settings.ShowRivers != _lastShowRivers);
 
             _lastRiverMask = settings.RiverRenderMask;
             _lastTerrainMask = settings.RenderLevelMask;
             _lastShowRivers = settings.ShowRivers;
 
-            // Если настройки изменились -> удаляем старые реки
-            if (settingsChanged || !settings.ShowRivers)
+            // Если ничего не изменилось и реки уже построены - выходим
+            if (!changed && !SystemAPI.QueryBuilder().WithAll<RiverChunkTag>().Build().IsEmpty) return;
+            
+            // Если изменилось или выключили - удаляем старое
+            if (changed || !settings.ShowRivers)
             {
-                var q = EntityManager.CreateEntityQuery(typeof(RiverChunkTag));
-                if (!q.IsEmpty) EntityManager.DestroyEntity(q);
-                
-                // Чистим меши безопасно (false = не immediate)
-                if (_createdMeshes.Count > 0) CleanupResources(false);
+                CleanupResources();
             }
 
             if (!settings.ShowRivers) return;
 
-            var existingRivers = SystemAPI.QueryBuilder().WithAll<RiverChunkTag>().Build();
-            if (!existingRivers.IsEmpty) return;
-
+            // Проверяем наличие данных террейна
             var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
             if (!EntityManager.HasBuffer<TerrainVisualData>(settingsEntity)) return;
-
-            // Ждем инициализации террейна (хотя бы данных), чтобы взять стили
-            var terrainQuery = SystemAPI.QueryBuilder().WithAll<VoronoiCellMeshTag>().Build();
-            if (terrainQuery.IsEmpty) return;
-
-            var visBuffer = EntityManager.GetBuffer<TerrainVisualData>(settingsEntity);
-            var styles = visBuffer.ToNativeArray(Allocator.TempJob); 
-
-            // Запускаем Builder
-            RiverMeshBuilder.Build(EntityManager, _riverMaterial, settings, styles, _createdMeshes);
             
-            styles.Dispose();
+            var styles = EntityManager.GetBuffer<TerrainVisualData>(settingsEntity).ToNativeArray(Allocator.TempJob);
+
+            try
+            {
+                // 1. Считаем геометрию во временные списки (без ECS)
+                var vList = new NativeList<ProceduralVertex>(Allocator.Temp);
+                var iList = new NativeList<ProceduralIndex>(Allocator.Temp);
+
+                RiverMeshBuilder_ECS.BuildToNativeList(EntityManager, settings, styles, vList, iList);
+
+                if (vList.Length > 0)
+                {
+                    // 2. Создаем сущность СРАЗУ со всеми компонентами (Архетип)
+                    // Это предотвращает ошибку ObjectDisposedException, так как не происходит сдвига памяти
+                    var riverArchetype = EntityManager.CreateArchetype(
+                        typeof(RiverChunkTag),
+                        typeof(ProceduralMeshReference), // Для UnifiedRenderSystem
+                        typeof(ProceduralVertex),        // Буфер вершин
+                        typeof(ProceduralIndex),         // Буфер индексов
+                        typeof(ProceduralMeshRequest),   // Запрос на рендер
+                        typeof(LocalToWorld),
+                        typeof(RenderBounds),
+                        typeof(UnifiedRenderTag)
+                    );
+
+                    Entity riverChunk = EntityManager.CreateEntity(riverArchetype);
+                    EntityManager.SetName(riverChunk, "Global_River_Network");
+
+                    // 3. Получаем буферы уже созданной сущности
+                    var vBuf = EntityManager.GetBuffer<ProceduralVertex>(riverChunk);
+                    var iBuf = EntityManager.GetBuffer<ProceduralIndex>(riverChunk);
+                    
+                    // 4. Заливаем данные
+                    vBuf.AddRange(vList.AsArray());
+                    iBuf.AddRange(iList.AsArray());
+
+                    // 5. Настраиваем материал
+                    EntityManager.SetComponentData(riverChunk, new ProceduralMeshRequest
+                    {
+                        IsDirty = true,
+                        MaterialName = "Universal Render Pipeline/Lit",
+                        Color = new float4(0.0f, 0.5f, 1.0f, 0.8f),
+                        Smoothness = 0.9f
+                    });
+                    
+                    EntityManager.SetComponentData(riverChunk, new LocalToWorld { Value = float4x4.identity });
+                    // Большие границы, чтобы не мерцало при повороте камеры
+                    EntityManager.SetComponentData(riverChunk, new RenderBounds { Value = new AABB { Extents = new float3(50000, 5000, 50000) } });
+                }
+                
+                vList.Dispose();
+                iList.Dispose();
+            }
+            finally
+            {
+                styles.Dispose();
+            }
         }
     }
 }

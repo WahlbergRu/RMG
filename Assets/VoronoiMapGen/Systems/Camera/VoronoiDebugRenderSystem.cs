@@ -3,40 +3,44 @@ using Unity.Mathematics;
 using Unity.Collections;
 using UnityEngine;
 using VoronoiMapGen.Components;
+using VoronoiMapGen.Utils; 
 
 namespace VoronoiMapGen.Systems
 {
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     public partial class VoronoiDebugRenderSystem : SystemBase
     {
-        // Палитра
         private readonly Color[] _levelColors = new Color[] 
         { 
-            Color.magenta,      // L0
-            Color.yellow,       // L1
-            Color.cyan,         // L2
-            new Color(0,1,0.5f) // L3
+            Color.magenta, 
+            Color.yellow, 
+            Color.cyan, 
+            new Color(0, 1, 0.5f) 
         };
 
         protected override void OnUpdate()
         {
             if (!SystemAPI.TryGetSingleton<MapSettings>(out var settings)) return;
             
-            if (settings.ShowRiverGizmos) 
-            {
-                DrawRivers(settings); // <-- Передаем настройки с маской
-            }
-
             if (settings.ShowDebugWireframe) 
             {
                 DrawGrid(settings);
+            }
+
+            if (settings.ShowRiverGizmos) 
+            {
+                DrawRivers(settings);
             }
         }
 
         private void DrawRivers(MapSettings settings)
         {
+            var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
+            if (!EntityManager.HasBuffer<TerrainVisualData>(settingsEntity)) return;
+            var styles = EntityManager.GetBuffer<TerrainVisualData>(settingsEntity).ToNativeArray(Allocator.Temp);
+
             var query = SystemAPI.QueryBuilder()
-                .WithAll<VoronoiCell, HydrologyData, DetailLevelData>()
+                .WithAll<VoronoiCell, HydrologyData, DetailLevelData, CellBiome>()
                 .Build();
             
             if (query.IsEmpty) return;
@@ -44,36 +48,80 @@ namespace VoronoiMapGen.Systems
             var cells = query.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
             var hydro = query.ToComponentDataArray<HydrologyData>(Allocator.Temp);
             var levels = query.ToComponentDataArray<DetailLevelData>(Allocator.Temp);
+            var biomes = query.ToComponentDataArray<CellBiome>(Allocator.Temp);
             
-            // Используем маску ОТЛАДКИ (Debug Mask)
             int debugMask = settings.RiverDebugMask;
 
             var posMap = new NativeParallelHashMap<int, float3>(cells.Length, Allocator.Temp);
             
+            // 1. Собираем позиции
             for (int i = 0; i < cells.Length; i++) 
             {
                 int lvl = (int)levels[i].Level;
-                float heightOffset = 160.0f - (lvl * 30.0f);
-                posMap.TryAdd(cells[i].SiteIndex, new float3(cells[i].Centroid.x, heightOffset, cells[i].Centroid.y));
+                int styleIdx = Mathf.Clamp(lvl, 0, styles.Length - 1);
+                float heightScale = styles[styleIdx].HeightScale;
+                
+                float elevation = biomes[i].Elevation;
+                if (biomes[i].Type == BiomeType.Ocean) elevation = 0.1f; 
+
+                float yPos = (math.pow(math.max(0, elevation), 1.5f) * heightScale) + 1.0f; 
+                float3 worldPos = new float3(cells[i].Centroid.x, yPos, cells[i].Centroid.y);
+                
+                int key = (lvl << 24) + cells[i].SiteIndex;
+                posMap.TryAdd(key, worldPos);
             }
 
+            // 2. Рисуем связи
             for (int i = 0; i < hydro.Length; i++)
             {
                 var h = hydro[i];
-                if (h.IsRiver && h.FlowTargetIndex != -1)
-                {
-                    // Проверка Уровня
-                    int lvl = (int)levels[i].Level;
-                    if ((debugMask & (1 << lvl)) == 0) continue; // Не рисуем
+                int lvl = (int)levels[i].Level;
+                
+                if ((debugMask & (1 << lvl)) == 0) continue; 
+                if (biomes[i].Type == BiomeType.Ocean) continue;
 
-                    if (posMap.TryGetValue(cells[i].SiteIndex, out float3 start) &&
-                        posMap.TryGetValue(h.FlowTargetIndex, out float3 end))
+                int myKey = (lvl << 24) + cells[i].SiteIndex;
+                
+                if (!posMap.TryGetValue(myKey, out float3 start)) continue;
+
+                // --- ЛОГИКА ОТРИСОВКИ ---
+
+                // А. ТУПИК (Озеро/Яма)
+                if (h.FlowTargetIndex == -1)
+                {
+                    // ИСПРАВЛЕНИЕ: Используем Debug.DrawLine вместо Gizmos
+                    // Рисуем высокий красный столб с перекрестием
+                    float3 top = start + new float3(0, 15, 0);
+                    
+                    Debug.DrawLine(start, top, Color.red); // Столб
+                    
+                    // Перекрестие наверху
+                    float crossSize = 3.0f;
+                    Debug.DrawLine(top - new float3(crossSize, 0, 0), top + new float3(crossSize, 0, 0), Color.red);
+                    Debug.DrawLine(top - new float3(0, 0, crossSize), top + new float3(0, 0, crossSize), Color.red);
+                    
+                    continue; 
+                }
+
+                // Б. ПОТОК
+                int targetKey = (lvl << 24) + h.FlowTargetIndex;
+                if (posMap.TryGetValue(targetKey, out float3 end))
+                {
+                    // Если поток сильный - цветная линия
+                    if (h.IsRiver)
                     {
-                        // Цвет
                         Color c = (lvl < _levelColors.Length) ? _levelColors[lvl] : Color.white;
-                        
                         Debug.DrawLine(start, end, c);
-                        Debug.DrawLine(start, start + new float3(0, 10, 0), c * 0.7f); // Pin
+                        
+                        // "Шпилька" посередине, чтобы видеть направление
+                        float3 mid = (start + end) * 0.5f;
+                        Debug.DrawLine(mid, mid + new float3(0, 5, 0), c); 
+                    }
+                    else 
+                    {
+                        // Слабый сток - серая тонкая линия
+                        Color weakColor = new Color(0.4f, 0.4f, 0.4f, 0.5f);
+                        Debug.DrawLine(start, end, weakColor);
                     }
                 }
             }
@@ -82,6 +130,8 @@ namespace VoronoiMapGen.Systems
             cells.Dispose();
             hydro.Dispose();
             levels.Dispose();
+            biomes.Dispose();
+            styles.Dispose();
         }
 
         private void DrawGrid(MapSettings settings)
@@ -96,16 +146,22 @@ namespace VoronoiMapGen.Systems
                 if (verts.Length < 2) continue;
 
                 Color c = Color.white;
-                if (lvl < customColors.Length) c = new Color(customColors[lvl].x, customColors[lvl].y, customColors[lvl].z);
-                else if (lvl < _levelColors.Length) c = _levelColors[lvl];
+                if (customColors.Length > lvl)
+                    c = new Color(customColors[lvl].x, customColors[lvl].y, customColors[lvl].z);
+                else if (lvl < _levelColors.Length) 
+                    c = _levelColors[lvl];
 
-                float yOffset = 10.0f + (lvl * 2.0f);
+                float yOffset = 10.0f + (lvl * 5.0f);
                 var vArray = verts.AsNativeArray();
                 for (int i = 0; i < vArray.Length; i++) 
                 {
                     float3 a = vArray[i].Value;
                     float3 b = vArray[(i + 1) % vArray.Length].Value;
-                    Debug.DrawLine(new float3(a.x, yOffset, a.z), new float3(b.x, yOffset, b.z), c);
+                    Debug.DrawLine(
+                        new float3(a.x, yOffset, a.z), 
+                        new float3(b.x, yOffset, b.z), 
+                        c
+                    );
                 }
             }
         }

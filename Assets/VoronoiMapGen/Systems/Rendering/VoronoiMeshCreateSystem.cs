@@ -9,18 +9,18 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Utils;
-using VoronoiMapGen.Systems.Rendering;
-using VoronoiMapGen.Systems.Rendering.Terrain; // <-- Подключаем неймспейс с хелперами
+using VoronoiMapGen.Systems.Rendering.Terrain;
 
-namespace VoronoiMapGen.Systems
+namespace VoronoiMapGen.Systems.Rendering
 {
     [WorldSystemFilter(WorldSystemFilterFlags.Presentation)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     public partial class VoronoiMeshCreateSystem : SystemBase
     {
-        private const int BATCH_SIZE = 2000;
+        private const int BATCH_SIZE = 1000; // Уменьшил батч, чтобы быстрее откликалось на движение
         private Material _defaultMaterial;
         private readonly List<Mesh> _createdMeshes = new List<Mesh>();
+        private Camera _mainCamera; // Кэш камеры
 
         protected override void OnCreate()
         {
@@ -37,18 +37,24 @@ namespace VoronoiMapGen.Systems
 
         protected override void OnDestroy()
         {
-            CleanupResources(immediate: true);
+            CleanupResources(forceImmediate: false);
             if (_defaultMaterial) Object.DestroyImmediate(_defaultMaterial);
         }
 
-        public void CleanupResources(bool immediate = false)
+        public void CleanupResources(bool forceImmediate = false)
         {
             if (_createdMeshes.Count == 0) return;
-            foreach (var m in _createdMeshes)
+            var manager = UnifiedResourceManager.TryGetInstance();
+            if (manager != null && !forceImmediate && Application.isPlaying)
             {
-                if (m == null) continue;
-                if (immediate) Object.DestroyImmediate(m);
-                else Object.Destroy(m);
+                foreach (var m in _createdMeshes) manager.SafeDestroy(m);
+            }
+            else
+            {
+                foreach (var m in _createdMeshes)
+                {
+                    if (m != null) Object.DestroyImmediate(m);
+                }
             }
             _createdMeshes.Clear();
         }
@@ -59,7 +65,14 @@ namespace VoronoiMapGen.Systems
             var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
             if (!EntityManager.HasBuffer<TerrainVisualData>(settingsEntity)) return;
 
-            // 1. Собираем сущности без меша
+            // 1. Получаем камеру и плоскости отсечения
+            if (_mainCamera == null) _mainCamera = Camera.main;
+            if (_mainCamera == null) return; // Нет камеры - не рендерим
+
+            // Получаем 6 плоскостей видимости камеры
+            Plane[] frustumPlanes = GeometryUtility.CalculateFrustumPlanes(_mainCamera);
+
+            // Ищем ячейки, которые нужно построить
             var query = SystemAPI.QueryBuilder()
                 .WithAll<VoronoiCell, CellPolygonVertex, DetailLevelData>()
                 .WithNone<VoronoiCellMeshTag>()
@@ -73,7 +86,10 @@ namespace VoronoiMapGen.Systems
             try
             {
                 using var entities = query.ToEntityArray(Allocator.TempJob);
-                var batchEntities = FilterEntities(entities, settings.RenderLevelMask);
+                using var cells = query.ToComponentDataArray<VoronoiCell>(Allocator.TempJob); // Для проверки Bounds
+
+                // Фильтруем: Уровень включен + Попадает в камеру
+                var batchEntities = FilterEntities(entities, cells, settings.RenderLevelMask, frustumPlanes);
 
                 if (batchEntities.Length > 0)
                 {
@@ -87,21 +103,54 @@ namespace VoronoiMapGen.Systems
             }
         }
 
-        private NativeList<Entity> FilterEntities(NativeArray<Entity> source, int renderMask)
+        private NativeList<Entity> FilterEntities(NativeArray<Entity> source, NativeArray<VoronoiCell> cells, int renderMask, Plane[] planes)
         {
             var batch = new NativeList<Entity>(BATCH_SIZE, Allocator.TempJob);
+            
+            // Размер ячейки для проверки (грубая оценка AABB)
+            // Можно брать из настроек, но 150.0f покрывает большинство ячеек L2-L3
+            float cullingSize = 150.0f; 
+            Vector3 sizeBox = new Vector3(cullingSize, 1000f, cullingSize); // Высота большая, чтобы не резать горы
+
             for (int i = 0; i < source.Length; i++)
             {
+                // Если набрали батч, выходим, остальное в след. кадре (распределение нагрузки)
                 if (batch.Length >= BATCH_SIZE) break;
-                var e = source[i];
-                var lvl = EntityManager.GetComponentData<DetailLevelData>(e).Level;
 
-                if ((renderMask & (1 << (int)lvl)) == 0 || EntityManager.GetBuffer<CellPolygonVertex>(e).Length < 3)
+                var e = source[i];
+                
+                // Проверка уровня (быстрая)
+                var lvl = EntityManager.GetComponentData<DetailLevelData>(e).Level;
+                if ((renderMask & (1 << (int)lvl)) == 0)
                 {
-                    EntityManager.AddComponent<VoronoiCellMeshTag>(e); // Помечаем как обработанное (пропущено)
+                    // Если уровень выключен глобально - помечаем как "не надо строить"
+                    // Но если вдруг включат, придется сбросить тег. Пока просто пропускаем и не метим.
+                    // Если пометить VoronoiCellMeshTag, то при включении уровня меш не появится.
+                    // Поэтому просто continue.
                     continue;
                 }
-                batch.Add(e);
+
+                // Проверка геометрии
+                if (EntityManager.GetBuffer<CellPolygonVertex>(e).Length < 3)
+                {
+                    EntityManager.AddComponent<VoronoiCellMeshTag>(e);
+                    continue;
+                }
+
+                // --- FRUSTUM CULLING (LAZY LOAD) ---
+                // Проверяем, видит ли камера эту ячейку.
+                // Центр берем из VoronoiCell.
+                var center = cells[i].Centroid;
+                Bounds bounds = new Bounds(new Vector3(center.x, 0, center.y), sizeBox);
+
+                // GeometryUtility.TestPlanesAABB возвращает true, если объект ВНУТРИ или ПЕРЕСЕКАЕТ пирамиду
+                if (GeometryUtility.TestPlanesAABB(planes, bounds))
+                {
+                    // Виден -> Добавляем в очередь на генерацию
+                    batch.Add(e);
+                }
+                // Если НЕ виден -> просто пропускаем в этом кадре. 
+                // Когда камера подвинется, query снова найдет его (т.к. тега MeshTag еще нет) и проверит.
             }
             return batch;
         }
@@ -113,13 +162,11 @@ namespace VoronoiMapGen.Systems
             var meshes = new Mesh[count];
             var bakeList = new NativeList<BakeData>(count, Allocator.TempJob);
 
-            // Lookup'ы для быстрого доступа
             var biomeLookup = SystemAPI.GetComponentLookup<CellBiome>(isReadOnly: true);
             var levelLookup = SystemAPI.GetComponentLookup<DetailLevelData>(isReadOnly: true);
             biomeLookup.Update(ref CheckedStateRef);
             levelLookup.Update(ref CheckedStateRef);
 
-            // Буферы для переиспользования памяти
             var ring0 = new NativeList<float3>(64, Allocator.Temp);
             var ring1 = new NativeList<float3>(64, Allocator.Temp);
 
@@ -131,12 +178,9 @@ namespace VoronoiMapGen.Systems
                     meshes[i] = new Mesh { name = $"Cell_{e.Index}" };
                     _createdMeshes.Add(meshes[i]);
 
-                    // Сборка контекста (данных для генерации)
                     GenerationContext ctx = BuildContext(e, styles, biomeLookup, levelLookup);
-                    
                     var inputVerts = EntityManager.GetBuffer<CellPolygonVertex>(e);
                     
-                    // Расчет размера буферов
                     TerrainGeometryBuilder.CalculateLayout(inputVerts.Length, ctx.Style, ctx.IsWater, out int totalVerts, out int totalIndices);
 
                     var md = mda[i];
@@ -146,7 +190,6 @@ namespace VoronoiMapGen.Systems
                         new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2));
                     md.SetIndexBufferParams(totalIndices, IndexFormat.UInt32);
 
-                    // ГЕНЕРАЦИЯ (ВЫЗОВ ВНЕШНЕГО КЛАССА)
                     TerrainGeometryBuilder.FillMesh(
                         md.GetVertexData<MeshGenerationUtils.SimpleVertex>(),
                         md.GetIndexData<int>(),
@@ -161,10 +204,8 @@ namespace VoronoiMapGen.Systems
                     });
                 }
 
-                // Apply to Unity
                 Mesh.ApplyAndDisposeWritableMeshData(mda, meshes, MeshUpdateFlags.DontRecalculateBounds);
 
-                // Bake to ECS
                 var rma = new RenderMeshArray(new[] { _defaultMaterial }, meshes);
                 var desc = new RenderMeshDescription(ShadowCastingMode.On, true);
 
@@ -210,12 +251,8 @@ namespace VoronoiMapGen.Systems
             }
 
             return new GenerationContext {
-                Style = style,
-                BaseHeight = baseHeight,
-                BottomDepth = -style.BottomDepth,
-                CenterPos = center,
-                IsWater = isWater,
-                Color = color
+                Style = style, BaseHeight = baseHeight, BottomDepth = -style.BottomDepth,
+                CenterPos = center, IsWater = isWater, Color = color
             };
         }
     }

@@ -1,77 +1,97 @@
 ﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
-using UnityEngine; // Для Color
+using UnityEngine; // Для Color и Range
 
 namespace VoronoiMapGen.Components
 {
-    // --- Configuration ---
+    // --- Global Tectonic Configuration ---
+    [System.Serializable]
+    public struct TectonicConfig
+    {
+        // Island Shape
+        public float IslandRadiusRatio; 
+        public float IslandFalloff;     
+        public float HeightOffset;      
 
+        // Mountains
+        public float MountainFreq;      
+        public float MountainSharpness; 
+        public float MountainHeight;    
+
+        // Erosion (Carving)
+        public float ValleyFreq;        
+        public float ValleyWidthPower;  
+        public float CarveStrength;     
+        public float CarveThreshold;    
+    }
+
+    // --- Main Map Settings Singleton ---
     public struct MapSettings : IComponentData
     {
         public int Seed;
         public float2 MapSize;
         public int LevelsCount; 
         
-        // Переключатели
+        // --- Feature Toggles ---
         public bool ShowRivers;      
         public bool ShowRiverGizmos; 
         
-        // Маски (исправлено под раздельное управление)
+        // --- Masks ---
         public int RiverRenderMask;  
         public int RiverDebugMask;   
         
-        // Legacy Render
-        public float EdgeWidth;
-        public float RoadWidth;
-        public Color RoadColor;
-        public Color BorderColor;
-        public bool DrawRoads;
-        public bool DrawBorders;
+        public bool UseAutoLOD; 
         
         public bool ShowDebugWireframe; 
         public int DebugLevelMask;     
         public int RenderLevelMask;
         
+        // --- Terrain Physics ---
         public float TerrainHeightScale; 
         public bool UseCache;
 
+        // --- Logic Configs ---
+        public TectonicConfig Tectonics;
+
+        // --- Legacy Visuals (Roads & Borders) ---
+        public bool DrawBorders;
+        public bool DrawRoads;
+        public float RoadWidth;
+        public float EdgeWidth;
+        public Color BorderColor;
+        public Color RoadColor;
+
+        // --- Internal State ---
         public bool IsGenerated;
+        
+        // --- Shared Colors ---
         public FixedList128Bytes<float4> DebugLayerColors; 
         public FixedList512Bytes<BiomeColorEntry> BiomeColors;
     }
 
+    // --- Per-Level Logic Configuration ---
     [System.Serializable]
     public struct LevelSettings : IBufferElementData
     {
         public int MinSiteCount; 
         public int MaxSiteCount; 
         
-        // --- ИСПРАВЛЕНИЕ: Добавлено свойство ---
         public int GlobalSiteCount => MaxSiteCount; 
         
         public float ScaleFactor;     
-        public float LODThreshold;
+        public float LODThreshold; // Порог высоты камеры для переключения
         public float RenderThreshold;
         public float ValueBias;
         public float ValueScale;
         public int RelaxationIterations;
         public float EmptyCellChance; 
+        
         [Range(0, 20)] public float VisualInset;
         [Range(0, 10)] public int VisualSmoothing;  
     }
 
-    public struct CameraSettingsData : IComponentData
-    {
-        public float PanSpeed;        
-        public float ZoomSpeed;       
-        public float MinHeight;       
-        public float MaxHeight;       
-        public float Smoothing;       
-        public float3 TargetPosition; 
-        public bool IsInitialized;    
-    }
-
+    // --- Hierarchical Levels ---
     public enum DetailLevel : byte
     {
         Global = 0, Regional = 1, Settlement = 2, 
@@ -84,12 +104,11 @@ namespace VoronoiMapGen.Components
         public int ParentIndex;
         public int ChildCount;
         public float InfluenceRadius;
-        
-        // --- ИСПРАВЛЕНИЕ: Поля возвращены ---
         public float LODThreshold;
         public float RenderThreshold;
     }
     
+    // --- Helpers ---
     public struct BiomeColorEntry : IComponentData
     {
         public BiomeType biomeType;
