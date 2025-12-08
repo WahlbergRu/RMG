@@ -285,24 +285,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Seed: 12368
-  UseCache: 0
+  UseCache: 1
   MapSize: {x: 1000, y: 1000}
   TerrainHeightScale: 500
-  Tectonics:
-    SizeRatio: 0.45
-    EdgeFalloff: 1.5
-    HeightDrop: 0.3
-    Frequency: 0.0012
-    Sharpness: 2.5
-    Amplitude: 0.9
-    ValleyFreq: 0.002
-    ValleyTightness: 5
-    CarveDepth: 0.5
-    MinHeightToCarve: 0.15
   ShowRivers: 1
   RiverRenderLevels: 00010101
-  ShowRiverGizmos: 1
+  ShowRiverGizmos: 0
   RiverDebugLevels: 00000000
+  UseAutoLOD: 1
   LevelConfigs:
   - MinSiteCount: 35
     MaxSiteCount: 45

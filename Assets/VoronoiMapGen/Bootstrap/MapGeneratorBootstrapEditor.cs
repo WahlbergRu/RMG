@@ -1,40 +1,48 @@
 ﻿using UnityEditor;
 using UnityEngine;
-using VoronoiMapGen.Bootstrap;
 
 namespace VoronoiMapGen.Bootstrap
 {
     [CustomEditor(typeof(MapGeneratorBootstrap))]
-    public class MapGeneratorBootstrapEditor : UnityEditor.Editor
+    public class MapGeneratorBootstrapEditor : Editor
     {
-        // Core
-        private SerializedProperty seedProp;
-        private SerializedProperty useCacheProp;
-        private SerializedProperty mapSizeProp;
-        private SerializedProperty terrainHeightScaleProp; 
-        
+        private SerializedProperty debugColorsProp;
+        private SerializedProperty debugLevelsProp;
+
+        private GUIStyle headerStyle;
+
         // Configuration
         private SerializedProperty levelConfigsProp;
-        private SerializedProperty visualConfigsProp;
-        private SerializedProperty useAutoLodProp; // <-- Новая галочка
-        
-        // Rendering & Rivers
-        private SerializedProperty showRiversProp;        
-        private SerializedProperty riverRenderLevelsProp; 
-        private SerializedProperty renderLevelsProp;      
-        
-        // Debug & Gizmos
-        private SerializedProperty showRiverGizmosProp;   
-        private SerializedProperty riverDebugLevelsProp;  
-        private SerializedProperty showWireframeProp;     
-        private SerializedProperty debugLevelsProp;       
-        private SerializedProperty debugColorsProp;       
-        
+        private SerializedProperty mapSizeProp;
+
         // Colors
-        private SerializedProperty oceanColorProp, coastColorProp, iceColorProp, desertColorProp, 
-            grasslandColorProp, forestColorProp, mountainColorProp, snowColorProp;
-        
-        private GUIStyle headerStyle;
+        private SerializedProperty oceanColorProp,
+            coastColorProp,
+            iceColorProp,
+            desertColorProp,
+            grasslandColorProp,
+            forestColorProp,
+            mountainColorProp,
+            snowColorProp;
+
+        private SerializedProperty renderLevelsProp;
+        private SerializedProperty riverDebugLevelsProp;
+
+        private SerializedProperty riverRenderLevelsProp;
+
+        // Core
+        private SerializedProperty seedProp;
+
+        // Debug & Gizmos
+        private SerializedProperty showRiverGizmosProp;
+
+        // Rendering & Rivers
+        private SerializedProperty showRiversProp;
+        private SerializedProperty showWireframeProp;
+        private SerializedProperty terrainHeightScaleProp;
+        private SerializedProperty useAutoLodProp; // <-- Новая галочка
+        private SerializedProperty useCacheProp;
+        private SerializedProperty visualConfigsProp;
 
         private void OnEnable()
         {
@@ -42,7 +50,7 @@ namespace VoronoiMapGen.Bootstrap
             seedProp = serializedObject.FindProperty("Seed");
             useCacheProp = serializedObject.FindProperty("UseCache");
             mapSizeProp = serializedObject.FindProperty("MapSize");
-            terrainHeightScaleProp = serializedObject.FindProperty("TerrainHeightScale"); 
+            terrainHeightScaleProp = serializedObject.FindProperty("TerrainHeightScale");
 
             // Logic & Styles
             levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
@@ -53,7 +61,7 @@ namespace VoronoiMapGen.Bootstrap
             showRiversProp = serializedObject.FindProperty("ShowRivers");
             riverRenderLevelsProp = serializedObject.FindProperty("RiverRenderLevels");
             renderLevelsProp = serializedObject.FindProperty("RenderLevels");
-            
+
             // Debug
             showRiverGizmosProp = serializedObject.FindProperty("ShowRiverGizmos");
             riverDebugLevelsProp = serializedObject.FindProperty("RiverDebugLevels");
@@ -74,30 +82,32 @@ namespace VoronoiMapGen.Bootstrap
 
         public override void OnInspectorGUI()
         {
-            MapGeneratorBootstrap bootstrap = (MapGeneratorBootstrap)target;
+            var bootstrap = (MapGeneratorBootstrap)target;
             serializedObject.Update();
 
-            headerStyle = new GUIStyle(EditorStyles.boldLabel) 
-            { 
-                fontSize = 11, 
+            headerStyle = new GUIStyle(EditorStyles.boldLabel)
+            {
+                fontSize = 11,
                 margin = new RectOffset(0, 0, 12, 4),
                 alignment = TextAnchor.MiddleLeft
             };
 
-            EditorGUI.BeginChangeCheck(); 
+            EditorGUI.BeginChangeCheck();
 
             DrawHeader("WORLD GENERATION (Require Rebuild)");
-            
+
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.PropertyField(seedProp);
-                if (GUILayout.Button("Dice", GUILayout.Width(45))) {
-                    seedProp.intValue = UnityEngine.Random.Range(0, 99999);
-                    GUI.FocusControl(null); 
+                if (GUILayout.Button("Dice", GUILayout.Width(45)))
+                {
+                    seedProp.intValue = Random.Range(0, 99999);
+                    GUI.FocusControl(null);
                 }
+
                 EditorGUILayout.EndHorizontal();
-                
+
                 EditorGUILayout.PropertyField(useCacheProp);
                 EditorGUILayout.PropertyField(mapSizeProp);
                 EditorGUILayout.PropertyField(terrainHeightScaleProp);
@@ -105,33 +115,35 @@ namespace VoronoiMapGen.Bootstrap
             EditorGUILayout.EndVertical();
 
             DrawHeader("CONFIGURATIONS");
-            
+
             // Галочка Авто-ЛOД (Важно)
             EditorGUILayout.PropertyField(useAutoLodProp);
             if (useAutoLodProp.boolValue)
-            {
-                EditorGUILayout.HelpBox("LOD is managed by Camera Height (System driven). Manual layer controls are disabled.", MessageType.Info);
-            }
+                EditorGUILayout.HelpBox(
+                    "LOD is managed by Camera Height (System driven). Manual layer controls are disabled.",
+                    MessageType.Info);
 
             if (levelConfigsProp != null)
             {
-                levelConfigsProp.isExpanded = EditorGUILayout.Foldout(levelConfigsProp.isExpanded, $"Logic Rules (Count: {levelConfigsProp.arraySize})", true);
-                if (levelConfigsProp.isExpanded) 
+                levelConfigsProp.isExpanded = EditorGUILayout.Foldout(levelConfigsProp.isExpanded,
+                    $"Logic Rules (Count: {levelConfigsProp.arraySize})", true);
+                if (levelConfigsProp.isExpanded)
                 {
                     EditorGUI.indentLevel++;
                     // true = показывать детей (чтобы видеть поле LOD Threshold)
-                    EditorGUILayout.PropertyField(levelConfigsProp, true); 
+                    EditorGUILayout.PropertyField(levelConfigsProp, true);
                     EditorGUI.indentLevel--;
                 }
             }
-            
+
             if (visualConfigsProp != null)
             {
-                visualConfigsProp.isExpanded = EditorGUILayout.Foldout(visualConfigsProp.isExpanded, $"Visual Styles (Count: {visualConfigsProp.arraySize})", true);
-                if (visualConfigsProp.isExpanded) 
+                visualConfigsProp.isExpanded = EditorGUILayout.Foldout(visualConfigsProp.isExpanded,
+                    $"Visual Styles (Count: {visualConfigsProp.arraySize})", true);
+                if (visualConfigsProp.isExpanded)
                 {
                     EditorGUI.indentLevel++;
-                    EditorGUILayout.PropertyField(visualConfigsProp, true); 
+                    EditorGUILayout.PropertyField(visualConfigsProp, true);
                     EditorGUI.indentLevel--;
                 }
             }
@@ -144,7 +156,7 @@ namespace VoronoiMapGen.Bootstrap
                 {
                     EditorGUILayout.LabelField("Terrain Meshes", EditorStyles.miniBoldLabel);
                     DrawCompactLevelMask(renderLevelsProp, "Terrain Layers");
-                    
+
                     EditorGUILayout.Space(6);
 
                     EditorGUILayout.LabelField("River Meshes", EditorStyles.miniBoldLabel);
@@ -166,11 +178,8 @@ namespace VoronoiMapGen.Bootstrap
             // Если были изменения -> ребилд
             if (EditorGUI.EndChangeCheck())
             {
-                serializedObject.ApplyModifiedProperties(); 
-                if (Application.isPlaying && GUIUtility.hotControl == 0)
-                {
-                    bootstrap.ResetVisualization();
-                }
+                serializedObject.ApplyModifiedProperties();
+                if (Application.isPlaying && GUIUtility.hotControl == 0) bootstrap.ResetVisualization();
             }
 
             DrawHeader("DEBUG TOOLS (Scene View)");
@@ -207,16 +216,22 @@ namespace VoronoiMapGen.Bootstrap
             EditorGUILayout.EndVertical();
 
             GUILayout.Space(10);
-            bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", false);
+            var showColors = EditorPrefs.GetBool("MapGen_ShowColors", false);
             showColors = EditorGUILayout.Foldout(showColors, "Biome Palette Colors", true);
             if (showColors)
             {
                 EditorGUI.indentLevel++;
-                DrawProp(oceanColorProp); DrawProp(coastColorProp); DrawProp(iceColorProp);
-                DrawProp(desertColorProp); DrawProp(grasslandColorProp); DrawProp(forestColorProp);
-                DrawProp(mountainColorProp); DrawProp(snowColorProp);
+                DrawProp(oceanColorProp);
+                DrawProp(coastColorProp);
+                DrawProp(iceColorProp);
+                DrawProp(desertColorProp);
+                DrawProp(grasslandColorProp);
+                DrawProp(forestColorProp);
+                DrawProp(mountainColorProp);
+                DrawProp(snowColorProp);
                 EditorGUI.indentLevel--;
             }
+
             EditorPrefs.SetBool("MapGen_ShowColors", showColors);
 
             serializedObject.ApplyModifiedProperties();
@@ -224,9 +239,8 @@ namespace VoronoiMapGen.Bootstrap
             GUILayout.Space(15);
             GUI.backgroundColor = new Color(0.9f, 0.9f, 1f);
             if (GUILayout.Button("FORCE REBUILD", GUILayout.Height(30)))
-            {
-                if (Application.isPlaying) bootstrap.ResetVisualization();
-            }
+                if (Application.isPlaying)
+                    bootstrap.ResetVisualization();
             GUI.backgroundColor = Color.white;
             GUILayout.Space(10);
         }
@@ -251,14 +265,14 @@ namespace VoronoiMapGen.Bootstrap
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel(label);
 
-            int originalIndent = EditorGUI.indentLevel;
+            var originalIndent = EditorGUI.indentLevel;
             EditorGUI.indentLevel = 0;
 
-            for (int i = 0; i < listProp.arraySize; i++)
+            for (var i = 0; i < listProp.arraySize; i++)
             {
-                SerializedProperty element = listProp.GetArrayElementAtIndex(i);
-                bool val = element.boolValue;
-                bool newVal = EditorGUILayout.ToggleLeft($"L{i}", val, GUILayout.Width(45));
+                var element = listProp.GetArrayElementAtIndex(i);
+                var val = element.boolValue;
+                var newVal = EditorGUILayout.ToggleLeft($"L{i}", val, GUILayout.Width(45));
                 if (newVal != val) element.boolValue = newVal;
             }
 
