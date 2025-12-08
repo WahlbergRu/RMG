@@ -13,8 +13,8 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             EntityManager em,
             MapSettings settings,
             NativeArray<TerrainVisualData> styles,
-            NativeList<ProceduralVertex> vList, // Destination
-            NativeList<ProceduralIndex> iList   // Destination
+            NativeList<ProceduralVertex> vList,
+            NativeList<ProceduralIndex> iList
         )
         {
             var query = em.CreateEntityQuery(
@@ -41,8 +41,10 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             }
 
             var renderMask = settings.RiverRenderMask;
+            
+            // Цвет рек (Синий)
+            var riverColor = new float4(0.0f, 0.4f, 0.9f, 0.9f);
 
-            // === OPTIMIZATION: Reuse Re-usable buffers to avoid GC Allocations per river segment ===
             var tempVerts = new NativeList<float3>(256, Allocator.Temp);
             var tempTris = new NativeList<int>(1024, Allocator.Temp);
             var tempUVs = new NativeList<float2>(256, Allocator.Temp);
@@ -59,39 +61,54 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                 var targetUniqueKey = (currentLvl << 24) + h.FlowTargetIndex;
                 if (!siteMap.TryGetValue(targetUniqueKey, out var nIdx)) continue;
 
-                // Calculate Config
                 var safeStyleIdx = RiverBuilderUtils.GetSafeStyleIndex((DetailLevel)currentLvl, styles.Length);
                 var myStyle = styles[safeStyleIdx];
 
-                // Calculate Heights
+                // Heights
                 var gA = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[i], myStyle.HeightScale);
                 var gB = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[nIdx], myStyle.HeightScale);
 
+                bool targetIsOcean = biomes[nIdx].Type == BiomeType.Ocean;
+
                 if (biomes[i].Type == BiomeType.Ocean) gA = 0.2f;
-                if (biomes[nIdx].Type == BiomeType.Ocean) gB = 0.2f;
+                if (targetIsOcean) gB = 0.2f;
 
                 var yOffset = 0.15f + myStyle.TopNoiseAmplitude * 0.6f;
                 var yA = gA + yOffset;
                 var yB = gB + yOffset;
 
-                var start = new float3(cells[i].Centroid.x, yA, cells[i].Centroid.y);
-                var end = new float3(cells[nIdx].Centroid.x, yB, cells[nIdx].Centroid.y);
+                // --- COORDINATES CALCULATION ---
+                var pStart2D = cells[i].Centroid;
+                var pEnd2D = cells[nIdx].Centroid;
 
+                // <--- COASTLINE FIX: Остановка реки на границе берега --->
+                // В Вороном граница (ребро) всегда лежит ровно посередине между двумя сайтами.
+                // Если мы впадаем в океан, нам нужно остановиться на берегу, а не плыть к центру океана.
+                if (targetIsOcean)
+                {
+                    pEnd2D = (pStart2D + pEnd2D) * 0.5f;
+                }
+
+                var start = new float3(pStart2D.x, yA, pStart2D.y);
+                var end = new float3(pEnd2D.x, yB, pEnd2D.y);
+
+                // --- VALIDATION ---
                 if (!RiverBuilderUtils.IsFinite(start) || !RiverBuilderUtils.IsFinite(end)) continue;
                 if (math.distancesq(start, end) < 0.1f) continue;
                 if (math.abs(yA - yB) > RiverBuilderUtils.MAX_HEIGHT_DIFF) continue;
 
-                // Calculate Width
+                // Widths
                 var fluxA = math.max(0, h.Flux);
                 var fluxB = math.max(0, hydro[nIdx].Flux);
                 var hierarchyBonus = 1.0f + math.max(0, 3 - currentLvl) * 0.2f;
                 var configWidthScale = myStyle.RiverWidthScale;
-
                 var wA = math.clamp(math.sqrt(fluxA) * hierarchyBonus * configWidthScale, 2.0f, 120.0f);
                 var wB = math.clamp(math.sqrt(fluxB) * hierarchyBonus * configWidthScale, 2.0f, 120.0f);
-                if (biomes[nIdx].Type == BiomeType.Ocean) wB *= 3.0f;
+                
+                // Делаем дельту широкой при впадении в море
+                if (targetIsOcean) wB *= 4.0f;
 
-                // === GENERATION (HOT PATH) ===
+                // Gen
                 tempVerts.Clear();
                 tempTris.Clear();
                 tempUVs.Clear();
@@ -104,10 +121,8 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                     ref tempVerts, ref tempTris, ref tempUVs, settings.Seed
                 );
 
-                // Skip invalid or empty results
                 if (tempVerts.Length == 0 || !RiverBuilderUtils.ValidateVertices(tempVerts)) continue;
 
-                // === AGGREGATE TO GLOBAL LIST ===
                 var baseVertexIndex = vList.Length;
 
                 for (var v = 0; v < tempVerts.Length; v++)
@@ -115,7 +130,8 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                     vList.Add(new ProceduralVertex
                     {
                         Position = tempVerts[v],
-                        Normal = math.up(), // We'll assume UP for simplicity, or recalc later
+                        Normal = math.up(),
+                        Color = riverColor,
                         UV = tempUVs[v]
                     });
                 }
@@ -125,12 +141,10 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                     iList.Add(new ProceduralIndex { Value = tempTris[t] + baseVertexIndex });
                 }
             }
-            
-            // Clean up temporary local buffers
+
             tempVerts.Dispose();
             tempTris.Dispose();
             tempUVs.Dispose();
-            
             siteMap.Dispose();
         }
     }

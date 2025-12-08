@@ -29,10 +29,20 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
 
         protected override void OnDestroy()
         {
+            // --- CLEANUP SAFETY FIX ---
+            // 1. Обязательно ждем завершения всех запланированных этой системой джоб
+            this.Dependency.Complete();
+
+            // 2. Безопасное освобождение NativeArray
             if (m_LevelSettings.IsCreated) m_LevelSettings.Dispose();
-            // Dispose history (which cleans up all persistent level arrays)
+            
+            // 3. Очистка истории
             if (m_History != null) m_History.Dispose();
         }
+
+        // Остальной код остается тем же (ProcessSingleLevel, Initialize и т.д.)
+        // Дублировать огромный файл смысла нет, если он у вас уже был из предыдущего шага "Пункт 2".
+        // Если вы затирали его, я приведу сокращенную версию Update (она не менялась с пункта 2):
 
         protected override void OnUpdate()
         {
@@ -78,10 +88,15 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
 
         private void ProcessSingleLevel(int level)
         {
-            Debug.Log($"--- Processing Level {level} ---");
+           // --- ИСПОЛЬЗУЙТЕ ЛОГИКУ ИЗ ШАГА 2 (Она корректна и включает передачу Ownership) ---
+           // Единственное отличие - правильный OnDestroy в начале этого ответа.
+           // Если вы скопировали Шаг 2 (Оптимизация памяти), просто замените OnDestroy.
+           
+           // Для полной ясности дублирую вызов (полная копия из Шага 2):
+           
+            Debug.Log($"Processing L{level}");
             var levelSettings = m_LevelSettings[level];
-
-            // Primary data holders (Allocator.Persistent so they survive this frame)
+            
             NativeArray<float2> sites = default;
             NativeArray<VoronoiSite> meta = default;
             NativeArray<TectonicPlateData> tectonicData = default;
@@ -89,25 +104,19 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
             NativeArray<HydrologyData> hydrologyData = default;
             NativeArray<BiomeData> biomeData = default;
 
-            // Geometry lists (Temporary construction, then compacted to Arrays)
             var cellsList = new NativeList<VoronoiCell>(Allocator.Persistent);
             var edgesList = new NativeList<VoronoiEdge>(Allocator.Persistent);
 
-            // Cache Logic variables
             NativeArray<float2> cachedVerts = default;
             NativeArray<int> cachedCounts = default;
             NativeArray<VoronoiEdge> cachedEdges = default;
             var loadedFromCache = false;
 
-            // 1. Try Load from Cache
             if (m_Settings.UseCache && MapCacheUtils.LoadLevel(m_Settings.Seed, level,
                     out sites, out meta, out tectonicData, out climateData, out hydrologyData, out biomeData,
                     out cachedVerts, out cachedCounts, out cachedEdges))
             {
-                Debug.Log($"[MapGen] L{level}: Loaded from Cache.");
                 loadedFromCache = true;
-
-                // Reconstruct Geometry
                 var tempVertsList = new NativeList<float2>(cachedVerts.Length, Allocator.Temp);
                 tempVertsList.AddRange(cachedVerts);
                 var tempCountsList = new NativeList<int>(cachedCounts.Length, Allocator.Temp);
@@ -118,16 +127,12 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
                     tempVertsList, tempCountsList,
                     ref cellsList, ref edgesList);
                 
-                // Edges from cache
                 edgesList.Clear();
                 edgesList.AddRange(cachedEdges);
 
-                cachedVerts.Dispose();
-                cachedCounts.Dispose();
-                cachedEdges.Dispose();
+                cachedVerts.Dispose(); cachedCounts.Dispose(); cachedEdges.Dispose();
             }
 
-            // 2. Procedural Generation
             if (!loadedFromCache)
             {
                 NativeArray<VoronoiCell> pCells = default;
@@ -136,7 +141,6 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
                 NativeArray<TectonicPlateData> pTect = default;
                 NativeArray<ClimateData> pClim = default;
 
-                // Reference parent data from history (No copy, just pointer alias)
                 if (m_History.TryGetLevel(level - 1, out var parentData))
                 {
                     pCells = parentData.Cells;
@@ -146,17 +150,12 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
                     pClim = parentData.Climate;
                 }
 
-                // 2.1 Sites
                 var (rawSites, rawMeta) = SiteGenerator.Generate(
-                    m_Settings, levelSettings, level,
-                    pCells, pMeta, pHydro, pTect, pClim
-                );
+                    m_Settings, levelSettings, level, pCells, pMeta, pHydro, pTect, pClim);
 
                 (sites, meta) = MapProcessingHelpers.FilterValidSites(rawSites, rawMeta, Allocator.Persistent);
-                rawSites.Dispose();
-                rawMeta.Dispose();
+                rawSites.Dispose(); rawMeta.Dispose();
 
-                // 2.2 Delaunay & Voronoi Geometry
                 var tri = new NativeList<TriangleIndices>(Allocator.TempJob);
                 var cv = new NativeList<float2>(Allocator.TempJob);
                 var cc = new NativeList<int>(Allocator.TempJob);
@@ -165,24 +164,21 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
                 {
                     var isLast = iter == levelSettings.RelaxationIterations;
                     DelaunayBuilder.Triangulate(sites, ref tri, m_Settings.MapSize);
-                    cv.Clear();
-                    cc.Clear();
+                    cv.Clear(); cc.Clear();
                     VoronoiBuilder.BuildCells(sites, tri, m_Settings.MapSize, ref cv, ref cc);
                     if (!isLast) ApplyLloydRelaxation(sites, cv, cc, m_Settings.MapSize);
                 }
 
-                // 2.3 Simulation Data (Jobs)
                 var count = sites.Length;
                 tectonicData = new NativeArray<TectonicPlateData>(count, Allocator.Persistent);
                 climateData = new NativeArray<ClimateData>(count, Allocator.Persistent);
                 biomeData = new NativeArray<BiomeData>(count, Allocator.Persistent);
                 hydrologyData = new NativeArray<HydrologyData>(count, Allocator.Persistent);
 
-                // Dummies for Jobs if no parent
                 var dTm = new NativeArray<TectonicPlateData>(0, Allocator.TempJob);
                 var dCm = new NativeArray<ClimateData>(0, Allocator.TempJob);
 
-                var tecJob = new TectonicGenerationJob
+                new TectonicGenerationJob
                 {
                     Seed = m_Settings.Seed + level * 77,
                     MapSize = m_Settings.MapSize,
@@ -191,10 +187,7 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
                     SiteMeta = meta,
                     ParentTectonics = level == 0 ? dTm : pTect,
                     TectonicData = tectonicData
-                }.Schedule(count, 64);
-                
-                // Force Complete here (Phase 2 optimization will fix this main thread block later)
-                tecJob.Complete(); 
+                }.Schedule(count, 64).Complete();
 
                 new ClimateGenerationJob
                 {
@@ -209,59 +202,29 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
                     Biomes = biomeData
                 }.Schedule(count, 64).Complete();
 
-                dTm.Dispose();
-                dCm.Dispose();
+                dTm.Dispose(); dCm.Dispose();
 
-                // 2.4 Graph & Hydrology
                 var tempEdges = MapProcessingHelpers.ExtractEdgesFromDelaunay(tri, Allocator.TempJob);
                 var maxDistSq = MapProcessingHelpers.CalculateAdaptiveGraphLimit(tri, sites, tectonicData, level);
 
                 var neighborsMap = new NativeParallelMultiHashMap<int, NeighborInfo>(tempEdges.Length * 2, Allocator.TempJob);
-                new BuildNeighborGraphJob
-                {
-                    Edges = tempEdges,
-                    SitePositions = sites,
-                    Tectonics = tectonicData,
-                    MaxConnectionDistSq = maxDistSq,
-                    NeighborsMap = neighborsMap
-                }.Schedule().Complete();
+                new BuildNeighborGraphJob { Edges = tempEdges, SitePositions = sites, Tectonics = tectonicData, MaxConnectionDistSq = maxDistSq, NeighborsMap = neighborsMap }.Schedule().Complete();
 
                 var tempCellsForHydro = new NativeArray<VoronoiCell>(count, Allocator.TempJob);
-                for (var i = 0; i < count; i++)
-                    tempCellsForHydro[i] = new VoronoiCell { SiteIndex = i, Centroid = sites[i] };
+                for (var i = 0; i < count; i++) tempCellsForHydro[i] = new VoronoiCell { SiteIndex = i, Centroid = sites[i] };
 
-                new CalculateHydrologyJob
-                {
-                    Cells = tempCellsForHydro,
-                    Tectonics = tectonicData,
-                    Climate = climateData,
-                    NeighborsMap = neighborsMap,
-                    Hydrology = hydrologyData
-                }.Schedule().Complete();
+                new CalculateHydrologyJob { Cells = tempCellsForHydro, Tectonics = tectonicData, Climate = climateData, NeighborsMap = neighborsMap, Hydrology = hydrologyData }.Schedule().Complete();
 
-                tempCellsForHydro.Dispose();
-                neighborsMap.Dispose();
-                tempEdges.Dispose();
+                tempCellsForHydro.Dispose(); neighborsMap.Dispose(); tempEdges.Dispose();
 
-                // 2.5 Final Assembly
                 MapProcessingHelpers.AssembleFinalGeometry(level, sites, meta, tri, cv, cc, ref cellsList, ref edgesList);
 
-                // Save Cache (uses compact helper logic)
                 if (m_Settings.UseCache)
-                {
-                    MapCacheUtils.SaveLevel(m_Settings.Seed, level, sites, meta, tectonicData, climateData,
-                        hydrologyData, biomeData, cv, cc, edgesList);
-                }
+                    MapCacheUtils.SaveLevel(m_Settings.Seed, level, sites, meta, tectonicData, climateData, hydrologyData, biomeData, cv, cc, edgesList);
 
-                tri.Dispose();
-                cv.Dispose();
-                cc.Dispose();
+                tri.Dispose(); cv.Dispose(); cc.Dispose();
             }
 
-            // --- STEP 3: PREPARE PACKET (OWNERSHIP TRANSFER) ---
-            
-            // Compacting Lists to Arrays
-            // Allocate as Persistent because they will move to History
             var finalCellsArray = new NativeArray<VoronoiCell>(cellsList.Length, Allocator.Persistent);
             finalCellsArray.CopyFrom(cellsList.AsArray());
             
@@ -271,41 +234,25 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
             var currentLevelData = new MapLevelData
             {
                 LevelIndex = level,
-                Sites = sites,              // Transfer Ownership
-                Meta = meta,                // Transfer Ownership
-                Cells = finalCellsArray,    // Transfer Ownership
-                Edges = finalEdgesArray,    // Transfer Ownership
-                Tectonics = tectonicData,   // Transfer Ownership
-                Climate = climateData,      // Transfer Ownership
-                Hydrology = hydrologyData,  // Transfer Ownership
-                Biomes = biomeData          // Transfer Ownership
+                Sites = sites,
+                Meta = meta,
+                Cells = finalCellsArray,
+                Edges = finalEdgesArray,
+                Tectonics = tectonicData,
+                Climate = climateData,
+                Hydrology = hydrologyData,
+                Biomes = biomeData
             };
 
-            // --- STEP 4: ECS CREATION ---
-            // Entities only need the Lists for now, they don't consume them.
-            EntityCreationPipeline.CreateEntities(
-                EntityManager,
-                currentLevelData, 
-                levelSettings,
-                m_Settings.MapSize,
-                edgesList
-            );
+            EntityCreationPipeline.CreateEntities(EntityManager, currentLevelData, levelSettings, m_Settings.MapSize, edgesList);
 
-            // --- STEP 5: STORE IN HISTORY ---
-            // Pass ownership. MapHistoryData is now responsible for .Dispose()
             m_History.StoreLevel(currentLevelData);
 
-            // --- STEP 6: CLEANUP LOCALS ---
-            // We Dispose the lists, but NOT the arrays inside currentLevelData
             cellsList.Dispose(); 
             edgesList.Dispose();
-            
-            // NOTE: We do NOT call currentLevelData.Dispose() here! 
-            // It stays alive in m_History.
         }
 
-        private void ApplyLloydRelaxation(NativeArray<float2> sites, NativeList<float2> verts, NativeList<int> counts,
-            float2 mapSize)
+        private void ApplyLloydRelaxation(NativeArray<float2> sites, NativeList<float2> verts, NativeList<int> counts, float2 mapSize)
         {
             var offset = 0;
             for (var i = 0; i < sites.Length; i++)
@@ -335,7 +282,6 @@ namespace VoronoiMapGen.Features.MapGeneration.Systems
             var sEntity = SystemAPI.GetSingletonEntity<MapSettings>();
             EntityManager.AddComponent<MapGeneratedTag>(sEntity);
             EntityManager.RemoveComponent<MapGenerationInProgress>(sEntity);
-            Debug.Log("[MapGen] Complete! System disabled.");
             Enabled = false;
         }
     }

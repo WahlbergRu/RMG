@@ -111,8 +111,16 @@ namespace VoronoiMapGen.Bootstrap
         private bool TryGetMapSize(out float2 size)
         {
             size = new float2(1000, 1000); // Default fallback
+            
             // Пытаемся найти настройки генератора на этом же объекте или в сцене
-            var gen = FindObjectOfType<MapGeneratorBootstrap>();
+            MapGeneratorBootstrap gen;
+            
+#if UNITY_2023_1_OR_NEWER
+            gen = FindFirstObjectByType<MapGeneratorBootstrap>();
+#else
+            gen = FindObjectOfType<MapGeneratorBootstrap>();
+#endif
+            
             if (gen != null)
             {
                 size = gen.MapSize;

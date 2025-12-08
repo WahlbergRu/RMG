@@ -46,10 +46,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             _lastTerrainMask = settings.RenderLevelMask;
             _lastShowRivers = settings.ShowRivers;
 
-            // Если настройки не менялись и рек нет, не делаем ничего
             if (!changed && !SystemAPI.QueryBuilder().WithAll<RiverChunkTag>().Build().IsEmpty) return;
-
-            // Если настройки изменились, удаляем старые чанки
             if (changed || !settings.ShowRivers) CleanupResources();
 
             if (!settings.ShowRivers) return;
@@ -60,7 +57,6 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
             try
             {
-                // Генерируем геометрию
                 var vList = new NativeList<ProceduralVertex>(Allocator.Temp);
                 var iList = new NativeList<ProceduralIndex>(Allocator.Temp);
 
@@ -68,13 +64,12 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
                 if (vList.Length > 0)
                 {
-                    // Создаем сущность реки с нужными компонентами
                     var riverArchetype = EntityManager.CreateArchetype(
                         typeof(RiverChunkTag),
                         typeof(ProceduralMeshReference),
                         typeof(ProceduralVertex),
                         typeof(ProceduralIndex),
-                        typeof(MeshDirtyTag),       // <-- Ключевой компонент для оптимизации
+                        typeof(MeshDirtyTag),       
                         typeof(ProceduralMeshRequest),
                         typeof(LocalToWorld),
                         typeof(RenderBounds),
@@ -90,13 +85,12 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                     vBuf.AddRange(vList.AsArray());
                     iBuf.AddRange(iList.AsArray());
 
-                    // Включаем Dirty Tag
                     EntityManager.SetComponentEnabled<MeshDirtyTag>(riverChunk, true);
 
                     EntityManager.SetComponentData(riverChunk, new ProceduralMeshRequest
                     {
-                        MaterialName = "Universal Render Pipeline/Lit",
-                        Color = new float4(0.0f, 0.5f, 1.0f, 0.8f),
+                        // Шейдер Particles для поддержки цветов вершин
+                        MaterialName = "Universal Render Pipeline/Particles/Lit", 
                         Smoothness = 0.9f
                     });
 

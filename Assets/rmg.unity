@@ -284,8 +284,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ee6f5765c0ed124283575f081ffa107, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Seed: 12368
-  UseCache: 1
+  Seed: 12370
+  UseCache: 0
   MapSize: {x: 1000, y: 1000}
   TerrainHeightScale: 500
   ShowRivers: 1
@@ -294,8 +294,8 @@ MonoBehaviour:
   RiverDebugLevels: 00000000
   UseAutoLOD: 1
   LevelConfigs:
-  - MinSiteCount: 35
-    MaxSiteCount: 45
+  - MinSiteCount: 60
+    MaxSiteCount: 80
     ScaleFactor: 1
     LODThreshold: 1200
     RenderThreshold: 1200
@@ -305,8 +305,8 @@ MonoBehaviour:
     EmptyCellChance: 0
     VisualInset: 0
     VisualSmoothing: 0
-  - MinSiteCount: 11
-    MaxSiteCount: 15
+  - MinSiteCount: 25
+    MaxSiteCount: 32
     ScaleFactor: 1
     LODThreshold: 800
     RenderThreshold: 800
@@ -317,7 +317,7 @@ MonoBehaviour:
     VisualInset: 0
     VisualSmoothing: 0
   - MinSiteCount: 3
-    MaxSiteCount: 4
+    MaxSiteCount: 8
     ScaleFactor: 0.8
     LODThreshold: 500
     RenderThreshold: 500

@@ -34,7 +34,7 @@ namespace VoronoiMapGen.Features.Rendering
             var manager = UnifiedResourceManager.Instance;
             if (manager == null) return;
 
-            // 1. CLEANUP (Удаление старых мешей)
+            // 1. CLEANUP
             var cleanupQuery = SystemAPI.QueryBuilder()
                 .WithAll<ProceduralMeshReference>()
                 .WithNone<ProceduralMeshRequest>()
@@ -56,9 +56,7 @@ namespace VoronoiMapGen.Features.Rendering
                 entitiesToClean.Dispose();
             }
 
-            // 2. RENDER GENERATION -- OPTIMIZED --
-            // Запрос вернет ТОЛЬКО те сущности, у которых MeshDirtyTag ВКЛЮЧЕН (Enabled).
-            // Если все теги выключены, Query.IsEmpty вернет true мгновенно, время кадра 0.00ms.
+            // 2. RENDER GENERATION
             var drawQuery = SystemAPI.QueryBuilder()
                 .WithAll<MeshDirtyTag, ProceduralMeshRequest, ProceduralVertex, ProceduralIndex>()
                 .Build();
@@ -74,15 +72,12 @@ namespace VoronoiMapGen.Features.Rendering
                 {
                     var e = entities[i];
                     var req = requests[i];
-
-                    // Получаем буферы
+                    
                     var verts = EntityManager.GetBuffer<ProceduralVertex>(e);
                     var inds = EntityManager.GetBuffer<ProceduralIndex>(e);
 
-                    // Если данные пустые, пропускаем
                     if (verts.Length < 3 || inds.Length < 3) 
                     {
-                        // Выключаем тэг, чтобы не проверять бесконечно
                         EntityManager.SetComponentEnabled<MeshDirtyTag>(e, false);
                         continue; 
                     }
@@ -93,7 +88,7 @@ namespace VoronoiMapGen.Features.Rendering
                     if (!_activeMeshes.TryGetValue(e, out mesh))
                     {
                         mesh = new Mesh();
-                        mesh.name = $"Procedural_{e.Index}";
+                        mesh.name = $"ProceduralChunk_{e.Index}";
                         mesh.MarkDynamic();
                         _activeMeshes[e] = mesh;
                         isNew = true;
@@ -103,11 +98,13 @@ namespace VoronoiMapGen.Features.Rendering
                         mesh.Clear(false);
                     }
 
-                    // --- Обновление Геометрии ---
-                    var layout = new NativeArray<VertexAttributeDescriptor>(3, Allocator.Temp);
+                    // --- Geometry Setup (Updated Layout) ---
+                    // Добавили Color (float4) в структуру меша
+                    var layout = new NativeArray<VertexAttributeDescriptor>(4, Allocator.Temp);
                     layout[0] = new VertexAttributeDescriptor(VertexAttribute.Position);
                     layout[1] = new VertexAttributeDescriptor(VertexAttribute.Normal);
-                    layout[2] = new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2);
+                    layout[2] = new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4); // RGBA
+                    layout[3] = new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2);
 
                     mesh.SetVertexBufferParams(verts.Length, layout);
                     layout.Dispose();
@@ -119,18 +116,21 @@ namespace VoronoiMapGen.Features.Rendering
 
                     mesh.subMeshCount = 1;
                     mesh.SetSubMesh(0, new SubMeshDescriptor(0, inds.Length));
-
                     mesh.RecalculateBounds();
-                    
-                    // Обновляем bounds для отсечения камерой
-                    EntityManager.SetComponentData(e, new RenderBounds { Value = mesh.bounds.ToAABB() });
 
-                    // --- Обновление Материала ---
+                    // --- Material & Color ---
+                    // Ставим Bounds для ECS
+                    EntityManager.SetComponentData(e, new RenderBounds { Value = mesh.bounds.ToAABB() });
+                    
                     var matName = req.MaterialName.ToString();
                     if (string.IsNullOrEmpty(matName)) matName = "Universal Render Pipeline/Lit";
-                    var mat = manager.GetMaterial(matName, req.Color, req.Smoothness);
+                    
+                    // Цвета теперь в вершинах, материал берем просто белый (чтобы умножать на Vertex Color) 
+                    // или используем настройки если вершинный цвет не нужен. 
+                    // Важно: Чтобы видеть цвета, URP материал должен иметь галочку "Vertex Color" или шейдер должен поддерживать это.
+                    // Для Standard URP Lit часто требуется небольшая настройка или белый цвет материала.
+                    var mat = manager.GetMaterial(matName, new float4(1,1,1,1), req.Smoothness);
 
-                    // Подключаем встроенные механизмы рендера Unity
                     RenderMeshUtility.AddComponents(
                         e,
                         EntityManager,
@@ -144,9 +144,6 @@ namespace VoronoiMapGen.Features.Rendering
                         EntityManager.AddComponentData(e, new ProceduralMeshReference { MeshInstanceID = mesh.GetInstanceID() });
                     }
 
-                    // ВАЖНО: ОТКЛЮЧАЕМ ТЭГ
-                    // Система больше не увидит эту сущность в запросе drawQuery, пока мы снова не сделаем 
-                    // SetComponentEnabled<MeshDirtyTag>(e, true)
                     EntityManager.SetComponentEnabled<MeshDirtyTag>(e, false);
                 }
             }

@@ -1,16 +1,19 @@
-﻿using Unity.Collections;
+﻿using System.Runtime.InteropServices;
+using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 
 namespace VoronoiMapGen.Features.Rendering.Components
 {
-    // --- ДАННЫЕ ГЕОМЕТРИИ (Буферы) ---
-
+    // Строгая последовательность полей важна для передачи данных в Mesh
+    [StructLayout(LayoutKind.Sequential)] 
     public struct ProceduralVertex : IBufferElementData
     {
-        public float3 Position;
-        public float3 Normal;
-        public float2 UV;
+        public float3 Position; // 0
+        public float3 Normal;   // 12
+        public float4 Color;    // 24 (RGBA)
+        public float2 UV;       // 40
+        // Total size: 48 bytes
     }
 
     public struct ProceduralIndex : IBufferElementData
@@ -18,25 +21,16 @@ namespace VoronoiMapGen.Features.Rendering.Components
         public int Value;
     }
 
-    // --- УПРАВЛЯЮЩИЕ КОМПОНЕНТЫ ---
-
-    /// <summary>
-    /// Компонент-ТЭГ для отслеживания изменений.
-    /// Реализует IEnableableComponent: когда он Disabled, Unity считает, что его НЕТ на сущности
-    /// для соответствующих запросов. Это дает Query.IsEmpty = true (0.00ms latency).
-    /// </summary>
     public struct MeshDirtyTag : IComponentData, IEnableableComponent 
     { 
     }
 
     public struct ProceduralMeshRequest : IComponentData
     {
-        // Поле 'IsDirty' удалено ради оптимизации через IEnableableComponent
-        
         public FixedString64Bytes MaterialName;
-        public float4 Color;
+        // Возвращаем поле Color (TINT)
+        public float4 Color; 
         public float Smoothness;
-        public int SortOrder;
     }
 
     public struct ProceduralMeshReference : ICleanupComponentData
@@ -44,7 +38,6 @@ namespace VoronoiMapGen.Features.Rendering.Components
         public int MeshInstanceID;
     }
 
-    // --- СИСТЕМНЫЕ ТЕГИ ---
     public struct UnifiedRenderTag : IComponentData
     {
     }

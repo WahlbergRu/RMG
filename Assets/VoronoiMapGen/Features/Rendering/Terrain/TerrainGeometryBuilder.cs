@@ -1,111 +1,95 @@
-﻿using Unity.Collections;
-using Unity.Entities;
+﻿using System.Runtime.CompilerServices;
+using Unity.Burst;
+using Unity.Collections;
 using Unity.Mathematics;
 using VoronoiMapGen.Features.MapGeneration.Components;
 using VoronoiMapGen.Features.Rendering.Components;
 
 namespace VoronoiMapGen.Features.Rendering.Terrain
 {
+    [BurstCompile]
     public static class TerrainGeometryBuilder
     {
-        // Рассчитывает, сколько памяти (вершин и индексов) нужно выделить
-        public static void CalculateLayout(int vertexCount, TerrainVisualData style, bool isWater, out int totalVerts,
-            out int totalIndices)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void CalculateLayout(int vertexCount, TerrainVisualData style, bool isWater, out int totalVerts, out int totalIndices)
         {
             var n = vertexCount;
             var layers = style.Style == TerrainStyle.Stratified && !isWater ? style.StrataCount : 1;
-
-            // Стены: 4 вершины на грань * кол-во граней * кол-во слоев + Крышка (n вершин)
             var wallVerts = layers * 4 * n;
             totalVerts = n + wallVerts;
-
-            // Индексы: Крышка (fan = n-2 треугольника) + Стенки (layers * n * 2 треугольника)
             totalIndices = (n - 2) * 3 + layers * n * 6;
         }
 
+        // --- ИСПРАВЛЕНИЕ: NativeArray<float3> input (без .ReadOnly) для упрощения вызова ---
+        [BurstCompile]
         public static void FillMesh(
-            NativeArray<MeshGenerationUtils.SimpleVertex> vb,
-            NativeArray<int> ib,
-            DynamicBuffer<CellPolygonVertex> inputVerts,
+            NativeArray<ProceduralVertex> outVerts,
+            NativeArray<ProceduralIndex> outIndices,
+            NativeArray<float3> input, // <--- Убран .ReadOnly
             GenerationContext ctx,
-            NativeList<float3> ringBufferA,
-            NativeList<float3> ringBufferB)
+            ref NativeList<float3> ringBufferA,
+            ref NativeList<float3> ringBufferB
+        )
         {
             if (ctx.Style.Style == TerrainStyle.Stratified && !ctx.IsWater)
-                GenerateStratified(vb, ib, inputVerts, ctx, ringBufferA, ringBufferB);
+                GenerateStratified(outVerts, outIndices, input, ctx, ref ringBufferA, ref ringBufferB);
             else
-                GenerateBlocky(vb, ib, inputVerts, ctx, ringBufferA, ringBufferB);
+                GenerateBlocky(outVerts, outIndices, input, ctx, ref ringBufferA, ref ringBufferB);
         }
 
         private static void GenerateBlocky(
-            NativeArray<MeshGenerationUtils.SimpleVertex> vb,
-            NativeArray<int> ib,
-            DynamicBuffer<CellPolygonVertex> inputVerts,
+            NativeArray<ProceduralVertex> vb,
+            NativeArray<ProceduralIndex> ib,
+            NativeArray<float3> input,
             GenerationContext ctx,
-            NativeList<float3> ring0,
-            NativeList<float3> ring1)
+            ref NativeList<float3> ring0,
+            ref NativeList<float3> ring1)
         {
-            var vPtr = 0;
-            var iPtr = 0;
+            int vPtr = 0;
+            int iPtr = 0;
+            ring0.Clear(); ring1.Clear();
 
-            ring0.Clear();
-            ring1.Clear();
+            CalculateInsetRing(input, ctx.CenterPos.xz, 0, ctx.BaseHeight, ref ring0);
+            CalculateInsetRing(input, ctx.CenterPos.xz, 0, ctx.BottomDepth, ref ring1);
 
-            // 1. Создаем контуры (Верх и Низ)
-            MeshGenerationUtils.CalculateInsetRing(inputVerts, ctx.CenterPos.xz, 0, ctx.BaseHeight, ref ring0);
-            MeshGenerationUtils.CalculateInsetRing(inputVerts, ctx.CenterPos.xz, 0, ctx.BottomDepth, ref ring1);
-
-            // 2. Переводим в локальные координаты (относительно центра ячейки)
-            MakeLocal(ring0, ctx.CenterPos);
-            MakeLocal(ring1, ctx.CenterPos);
-
-            // 3. Крышка (Top)
             var baseV = vPtr;
             for (var k = 0; k < ring0.Length; k++)
             {
                 var pos = ring0[k];
-                // Шум поверхности
                 if (ctx.Style.TopNoiseAmplitude > 0)
                 {
-                    var worldX = pos.x + ctx.CenterPos.x;
-                    var worldZ = pos.z + ctx.CenterPos.z;
-                    pos.y += noise.snoise(new float2(worldX, worldZ) * 0.2f) * ctx.Style.TopNoiseAmplitude;
+                    pos.y += noise.snoise(new float2(pos.x + ctx.CenterPos.x, pos.z + ctx.CenterPos.z) * 0.2f) * ctx.Style.TopNoiseAmplitude;
                 }
-
-                vb[vPtr++] = new MeshGenerationUtils.SimpleVertex
-                    { Position = pos, Normal = math.up(), UV = new float2(pos.x, pos.z) };
+                
+                // Деление UV на масштаб (fix 2 в вашем списке улучшений)
+                float uvScale = 0.05f; 
+                vb[vPtr++] = new ProceduralVertex { Position = pos, Normal = math.up(), Color = ctx.Color, UV = new float2(pos.x, pos.z) * uvScale };
             }
 
-            // Индексы крышки (Triangle Fan)
             for (var k = 1; k < ring0.Length - 1; k++)
             {
-                ib[iPtr++] = baseV + 0;
-                ib[iPtr++] = baseV + k + 1;
-                ib[iPtr++] = baseV + k;
+                ib[iPtr++] = new ProceduralIndex { Value = baseV + 0 };
+                ib[iPtr++] = new ProceduralIndex { Value = baseV + k + 1 };
+                ib[iPtr++] = new ProceduralIndex { Value = baseV + k };
             }
-
-            // 4. Стенки
-            MeshGenerationUtils.AddWallSegment(ring0, ring1, vb, ib, ref vPtr, ref iPtr);
+            AddWallSegment(ring0, ring1, ctx.Color, vb, ib, ref vPtr, ref iPtr);
         }
 
         private static void GenerateStratified(
-            NativeArray<MeshGenerationUtils.SimpleVertex> vb,
-            NativeArray<int> ib,
-            DynamicBuffer<CellPolygonVertex> inputVerts,
+            NativeArray<ProceduralVertex> vb,
+            NativeArray<ProceduralIndex> ib,
+            NativeArray<float3> input,
             GenerationContext ctx,
-            NativeList<float3> ringTop,
-            NativeList<float3> ringBot)
+            ref NativeList<float3> ringTop,
+            ref NativeList<float3> ringBot)
         {
-            var vPtr = 0;
-            var iPtr = 0;
-
+            int vPtr = 0;
+            int iPtr = 0;
             var currentY = ctx.BaseHeight;
             var currentInset = 0f;
 
-            // 1. Крышка
             ringTop.Clear();
-            MeshGenerationUtils.CalculateInsetRing(inputVerts, ctx.CenterPos.xz, currentInset, currentY, ref ringTop);
-            MakeLocal(ringTop, ctx.CenterPos);
+            CalculateInsetRing(input, ctx.CenterPos.xz, currentInset, currentY, ref ringTop);
 
             var baseV = vPtr;
             for (var k = 0; k < ringTop.Length; k++)
@@ -113,49 +97,83 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 var pos = ringTop[k];
                 if (ctx.Style.TopNoiseAmplitude > 0)
                 {
-                    var worldX = pos.x + ctx.CenterPos.x;
-                    var worldZ = pos.z + ctx.CenterPos.z;
-                    pos.y += noise.snoise(new float2(worldX, worldZ) * 0.2f) * ctx.Style.TopNoiseAmplitude;
+                     pos.y += noise.snoise(new float2(pos.x + ctx.CenterPos.x, pos.z + ctx.CenterPos.z) * 0.2f) * ctx.Style.TopNoiseAmplitude;
                 }
-
-                vb[vPtr++] = new MeshGenerationUtils.SimpleVertex
-                    { Position = pos, Normal = math.up(), UV = new float2(pos.x, pos.z) };
+                float uvScale = 0.05f;
+                vb[vPtr++] = new ProceduralVertex { Position = pos, Normal = math.up(), Color = ctx.Color, UV = new float2(pos.x, pos.z) * uvScale };
             }
 
             for (var k = 1; k < ringTop.Length - 1; k++)
             {
-                ib[iPtr++] = baseV + 0;
-                ib[iPtr++] = baseV + k + 1;
-                ib[iPtr++] = baseV + k;
+                ib[iPtr++] = new ProceduralIndex { Value = baseV + 0 };
+                ib[iPtr++] = new ProceduralIndex { Value = baseV + k + 1 };
+                ib[iPtr++] = new ProceduralIndex { Value = baseV + k };
             }
 
-            // 2. Слоистые стенки
             for (var k = 0; k < ctx.Style.StrataCount; k++)
             {
-                var nextY = math.lerp(ctx.BaseHeight, ctx.BottomDepth, (float)(k + 1) / ctx.Style.StrataCount);
+                var ratio = (float)(k + 1) / ctx.Style.StrataCount;
+                var nextY = math.lerp(ctx.BaseHeight, ctx.BottomDepth, ratio);
                 if (k == 0) nextY = math.max(nextY, ctx.BaseHeight - 5.0f);
 
-                // Вычисляем смещение (Jitter + Inset)
-                var jitter = noise.snoise(new float2(ctx.CenterPos.x, ctx.CenterPos.z + k) * 15f) *
-                             ctx.Style.StrataJitter;
+                var jitter = noise.snoise(new float2(ctx.CenterPos.x, ctx.CenterPos.z + k) * 15f) * ctx.Style.StrataJitter;
 
                 ringBot.Clear();
-                MeshGenerationUtils.CalculateInsetRing(inputVerts, ctx.CenterPos.xz,
-                    currentInset + jitter + (k > 0 ? ctx.Style.StrataInset : 0), nextY, ref ringBot);
-                MakeLocal(ringBot, ctx.CenterPos);
+                CalculateInsetRing(input, ctx.CenterPos.xz, currentInset + jitter + (k > 0 ? ctx.Style.StrataInset : 0), nextY, ref ringBot);
 
-                MeshGenerationUtils.AddWallSegment(ringTop, ringBot, vb, ib, ref vPtr, ref iPtr);
+                var layerColor = ctx.Color * (1.0f - (ratio * 0.5f)); 
+                layerColor.w = 1.0f; 
 
-                // Нижнее кольцо становится верхним для следующего слоя
+                AddWallSegment(ringTop, ringBot, layerColor, vb, ib, ref vPtr, ref iPtr);
                 ringTop.Clear();
                 ringTop.AddRange(ringBot.AsArray());
                 currentY = nextY;
             }
         }
-
-        private static void MakeLocal(NativeList<float3> ring, float3 center)
+        
+        private static void CalculateInsetRing(NativeArray<float3> sourceVerts, float2 center, float insetDistance, float yPos, ref NativeList<float3> outRing)
         {
-            for (var i = 0; i < ring.Length; i++) ring[i] -= center;
+            for (var i = 0; i < sourceVerts.Length; i++)
+            {
+                var v = new float2(sourceVerts[i].x, sourceVerts[i].z);
+                var dir = v - center;
+                var dist = math.length(dir);
+                if (dist < insetDistance * 1.01f) outRing.Add(new float3(center.x, yPos, center.y));
+                else {
+                    var newPos = center + math.normalize(dir) * (dist - insetDistance);
+                    outRing.Add(new float3(newPos.x, yPos, newPos.y));
+                }
+            }
+        }
+
+        private static void AddWallSegment(NativeList<float3> topRing, NativeList<float3> bottomRing, float4 color, NativeArray<ProceduralVertex> vBuffer, NativeArray<ProceduralIndex> iBuffer, ref int vIndex, ref int iIndex)
+        {
+            var n = topRing.Length;
+            for (var i = 0; i < n; i++)
+            {
+                var next = (i + 1) % n;
+                var t1 = topRing[i]; var t2 = topRing[next];
+                var b1 = bottomRing[i]; var b2 = bottomRing[next];
+
+                var dir = t2 - t1;
+                var down = b1 - t1;
+                var normal = math.normalize(math.cross(down, dir));
+
+                int baseV = vIndex;
+                vBuffer[vIndex + 0] = new ProceduralVertex { Position = t1, Normal = normal, Color = color, UV = new float2(0, 1) };
+                vBuffer[vIndex + 1] = new ProceduralVertex { Position = t2, Normal = normal, Color = color, UV = new float2(1, 1) };
+                vBuffer[vIndex + 2] = new ProceduralVertex { Position = b2, Normal = normal, Color = color, UV = new float2(1, 0) };
+                vBuffer[vIndex + 3] = new ProceduralVertex { Position = b1, Normal = normal, Color = color, UV = new float2(0, 0) };
+                
+                iBuffer[iIndex++] = new ProceduralIndex { Value = baseV + 0 };
+                iBuffer[iIndex++] = new ProceduralIndex { Value = baseV + 1 };
+                iBuffer[iIndex++] = new ProceduralIndex { Value = baseV + 2 };
+
+                iBuffer[iIndex++] = new ProceduralIndex { Value = baseV + 0 };
+                iBuffer[iIndex++] = new ProceduralIndex { Value = baseV + 2 };
+                iBuffer[iIndex++] = new ProceduralIndex { Value = baseV + 3 };
+                vIndex += 4;
+            }
         }
     }
 }

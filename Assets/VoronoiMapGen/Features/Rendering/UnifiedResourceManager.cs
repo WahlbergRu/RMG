@@ -9,7 +9,6 @@ namespace VoronoiMapGen.Features.Rendering
         private static UnifiedResourceManager _instance;
         private static bool _isQuitting;
         private readonly Queue<DeadItem> _graveyard = new();
-
         private readonly Dictionary<string, Material> _materials = new();
 
         public static UnifiedResourceManager Instance
@@ -19,13 +18,11 @@ namespace VoronoiMapGen.Features.Rendering
                 if (_isQuitting) return null;
                 if (_instance == null)
                 {
-                    // ИСПРАВЛЕНИЕ: Используем более новый API если возможно, или старый
 #if UNITY_2023_1_OR_NEWER
                     _instance = FindFirstObjectByType<UnifiedResourceManager>();
 #else
                     _instance = Object.FindObjectOfType<UnifiedResourceManager>();
 #endif
-
                     if (_instance == null)
                     {
                         var go = new GameObject("UnifiedResourceManager");
@@ -33,7 +30,6 @@ namespace VoronoiMapGen.Features.Rendering
                         DontDestroyOnLoad(go);
                     }
                 }
-
                 return _instance;
             }
         }
@@ -59,10 +55,8 @@ namespace VoronoiMapGen.Features.Rendering
         private void OnDestroy()
         {
             foreach (var kvp in _materials)
-                if (kvp.Value)
-                    DestroyImmediate(kvp.Value);
+                if (kvp.Value) DestroyImmediate(kvp.Value);
             _materials.Clear();
-
             while (_graveyard.Count > 0)
             {
                 var item = _graveyard.Dequeue();
@@ -86,7 +80,6 @@ namespace VoronoiMapGen.Features.Rendering
         {
             if (_isQuitting) return null;
             if (_instance != null) return _instance;
-
 #if UNITY_2023_1_OR_NEWER
             return FindFirstObjectByType<UnifiedResourceManager>();
 #else
@@ -99,14 +92,35 @@ namespace VoronoiMapGen.Features.Rendering
             var key = $"{shaderName}_{color}_{smoothness}";
             if (_materials.TryGetValue(key, out var mat) && mat != null) return mat;
 
-            var shader = Shader.Find(shaderName) ?? Shader.Find("Universal Render Pipeline/Lit");
-            if (!shader) shader = Shader.Find("Standard");
+            // Ищем шейдер
+            var shader = Shader.Find(shaderName);
+            if (!shader) 
+            {
+                // Fallbacks
+                shader = Shader.Find("Universal Render Pipeline/Particles/Lit"); 
+                if(!shader) shader = Shader.Find("Universal Render Pipeline/Lit");
+                if(!shader) shader = Shader.Find("Standard");
+            }
 
             mat = new Material(shader);
             mat.enableInstancing = true;
             mat.color = new Color(color.x, color.y, color.z, color.w);
             mat.SetFloat("_Smoothness", smoothness);
-            mat.SetFloat("_Cull", 0);
+            
+            // --- FIX FOR PARTICLE SHADER OPACITY ---
+            // Если мы используем Particle Shader, заставляем его быть Opaque,
+            // чтобы карта нормально рендерилась в глубину и принимала тени
+            if (shader.name.Contains("Particles"))
+            {
+                mat.SetFloat("_Mode", 0); // 0 = Opaque, 2 = Fade
+                mat.SetFloat("_Surface", 0); // 0 = Opaque, 1 = Transparent (URP param)
+                mat.SetInt("_ZWrite", 1);
+                mat.renderQueue = 2000; // Geometry queue
+                mat.EnableKeyword("_SURFACE_TYPE_OPAQUE");
+                mat.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.SetOverrideTag("RenderType", "Opaque");
+            }
+            // ---------------------------------------
 
             _materials[key] = mat;
             return mat;
@@ -115,13 +129,11 @@ namespace VoronoiMapGen.Features.Rendering
         public void SafeDestroy(Object obj)
         {
             if (obj == null) return;
-
             if (!Application.isPlaying || _isQuitting)
             {
                 DestroyImmediate(obj);
                 return;
             }
-
             var delayFrames = Application.isPlaying ? 5 : 1;
             _graveyard.Enqueue(new DeadItem { obj = obj, dieTime = Time.frameCount + delayFrames });
         }
