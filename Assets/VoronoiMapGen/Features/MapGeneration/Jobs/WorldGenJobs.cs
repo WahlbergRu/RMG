@@ -22,36 +22,36 @@ namespace VoronoiMapGen.Features.MapGeneration
 
         public void Execute(int i)
         {
-            var pos = Sites[i];
+            float2 pos = Sites[i];
 
             float baseHeight = 0;
-            var isOcean = false;
+            bool isOcean = false;
 
             // --- L0 (GLOBAL) ---
             if (Level == 0)
             {
-                var center = MapSize * 0.5f;
-                var dist = math.distance(pos, center);
-                var maxRadius = math.min(MapSize.x, MapSize.y) * 0.45f;
-                var distPercent = math.clamp(dist / maxRadius, 0f, 1f);
+                float2 center = MapSize * 0.5f;
+                float dist = math.distance(pos, center);
+                float maxRadius = math.min(MapSize.x, MapSize.y) * 0.45f;
+                float distPercent = math.clamp(dist / maxRadius, 0f, 1f);
 
                 // 1. Форма острова (Купол)
                 // Делаем купол чуть выше, чтобы был запас для гор
-                var islandShape = (1.0f - math.pow(distPercent, 1.5f)) * 1.5f - 0.3f;
+                float islandShape = (1.0f - math.pow(distPercent, 1.5f)) * 1.5f - 0.3f;
 
                 // 2. Базовый ландшафт (Низкочастотные холмы)
-                var baseNoise = noise.snoise(pos * 0.0004f + new float2(Seed * 0.1f));
+                float baseNoise = noise.snoise(pos * 0.0004f + new float2(Seed * 0.1f));
 
                 // 3. --- ГОРЫ (Ridged Noise) ---
                 // Создаем острые пики. "1 - abs(noise)" делает острые верхушки.
-                var mountainFreq = 0.0012f;
-                var mountainRaw = noise.snoise(pos * mountainFreq + new float2(Seed * 0.5f));
-                var ridgedMountains = 1.0f - math.abs(mountainRaw); // Острые гребни
+                float mountainFreq = 0.0012f;
+                float mountainRaw = noise.snoise(pos * mountainFreq + new float2(Seed * 0.5f));
+                float ridgedMountains = 1.0f - math.abs(mountainRaw); // Острые гребни
                 ridgedMountains = math.pow(ridgedMountains, 2.5f); // Делаем пики более выраженными
 
                 // Добавляем горы только ближе к центру (где islandShape высокий)
                 // smoothstep(0.2, 0.8, ...) означает, что горы растут, начиная с 20% высоты острова.
-                var mountainMask = math.smoothstep(0.2f, 0.8f, islandShape);
+                float mountainMask = math.smoothstep(0.2f, 0.8f, islandShape);
 
                 // Складываем базу и горы.
                 // 0.6f силы гор + 0.3f базового шума + форма острова
@@ -60,14 +60,14 @@ namespace VoronoiMapGen.Features.MapGeneration
                 // 4. --- ЭРОЗИЯ / ПРОЛИВЫ (Carving) ---
 
                 // Шум для каньонов
-                var valleyFreq = 0.002f;
-                var valleyRaw = noise.snoise(pos * valleyFreq + new float2(Seed * 0.9f));
-                var valleyFactor = 1.0f - math.abs(valleyRaw);
+                float valleyFreq = 0.002f;
+                float valleyRaw = noise.snoise(pos * valleyFreq + new float2(Seed * 0.9f));
+                float valleyFactor = 1.0f - math.abs(valleyRaw);
                 valleyFactor = math.pow(valleyFactor, 4.0f); // Узкие глубокие ущелья
 
                 // Режем только там, где уже высоко (чтобы не дырявить берега)
-                var carveMask = math.smoothstep(0.1f, 0.6f, baseHeight);
-                var carveStrength = 0.7f; // Глубокий разрез
+                float carveMask = math.smoothstep(0.1f, 0.6f, baseHeight);
+                float carveStrength = 0.7f; // Глубокий разрез
 
                 if (baseHeight > 0.05f)
                     // Вычитаем каньон.
@@ -84,11 +84,11 @@ namespace VoronoiMapGen.Features.MapGeneration
             // --- L1+ (CHILDREN) ---
             else
             {
-                var parentIdx = SiteMeta[i].ParentIndex;
+                int parentIdx = SiteMeta[i].ParentIndex;
 
                 if (ParentTectonics.Length > 0 && parentIdx >= 0 && parentIdx < ParentTectonics.Length)
                 {
-                    var parentData = ParentTectonics[parentIdx];
+                    TectonicPlateData parentData = ParentTectonics[parentIdx];
 
                     if (parentData.IsOcean)
                     {
@@ -98,12 +98,12 @@ namespace VoronoiMapGen.Features.MapGeneration
                     else
                     {
                         // Детализация
-                        var freq = 0.002f * math.pow(3.0f, Level);
-                        var detail = noise.snoise(pos * freq + new float2(Seed * 0.3f));
-                        var amp = 0.2f / Level; // Чуть больше деталей
+                        float freq = 0.002f * math.pow(3.0f, Level);
+                        float detail = noise.snoise(pos * freq + new float2(Seed * 0.3f));
+                        float amp = 0.2f / Level; // Чуть больше деталей
 
                         // Локальная эрозия (мелкие овраги на склонах)
-                        var localValley = 1.0f - math.abs(noise.snoise(pos * (freq * 1.5f) + new float2(Seed * 0.8f)));
+                        float localValley = 1.0f - math.abs(noise.snoise(pos * (freq * 1.5f) + new float2(Seed * 0.8f)));
                         localValley = math.pow(localValley, 3.0f) * (0.25f / Level);
 
                         // Наследуем высоту родителя + детали
@@ -163,26 +163,26 @@ namespace VoronoiMapGen.Features.MapGeneration
 
         public void Execute(int i)
         {
-            var pos = Sites[i];
-            var plate = Tectonics[i];
-            var height = plate.BaseHeight;
+            float2 pos = Sites[i];
+            TectonicPlateData plate = Tectonics[i];
+            float height = plate.BaseHeight;
 
-            var temp = 0.5f;
-            var moisture = 0.5f;
+            float temp = 0.5f;
+            float moisture = 0.5f;
 
             if (Level > 0 && ParentClimate.Length > 0)
             {
-                var pIdx = SiteMeta[i].ParentIndex;
+                int pIdx = SiteMeta[i].ParentIndex;
                 if (pIdx >= 0 && pIdx < ParentClimate.Length)
                 {
-                    var pc = ParentClimate[pIdx];
+                    ClimateData pc = ParentClimate[pIdx];
                     temp = pc.Temperature + noise.snoise(pos * 0.01f) * 0.05f;
                     moisture = pc.Moisture + noise.snoise(pos * 0.01f + new float2(100)) * 0.05f;
                 }
             }
             else
             {
-                var latitude = pos.y / MapSize.y;
+                float latitude = pos.y / MapSize.y;
                 temp = 1.0f - math.abs(latitude - 0.5f) * 2.0f;
                 if (height > 0.4f) temp -= (height - 0.4f) * 0.9f; // Температура сильнее падает с высотой
 

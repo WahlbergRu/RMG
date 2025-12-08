@@ -18,11 +18,11 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             ref NativeList<float3> outRing)
         {
             // Для выпуклых ячеек Вороного простой Lerp к центру работает отлично и дешево
-            for (var i = 0; i < sourceVerts.Length; i++)
+            for (int i = 0; i < sourceVerts.Length; i++)
             {
-                var v = new float2(sourceVerts[i].Value.x, sourceVerts[i].Value.z);
-                var dir = v - center;
-                var dist = math.length(dir);
+                float2 v = new float2(sourceVerts[i].Value.x, sourceVerts[i].Value.z);
+                float2 dir = v - center;
+                float dist = math.length(dir);
 
                 // Если дистанция слишком мала, не сжимаем дальше, чтобы не вывернуть полигон
                 if (dist < insetDistance * 1.1f)
@@ -31,7 +31,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 }
                 else
                 {
-                    var newPos = center + math.normalize(dir) * (dist - insetDistance);
+                    float2 newPos = center + math.normalize(dir) * (dist - insetDistance);
                     outRing.Add(new float3(newPos.x, yPos, newPos.y));
                 }
             }
@@ -48,21 +48,21 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             ref int vIndex,
             ref int iIndex)
         {
-            var n = topRing.Length;
+            int n = topRing.Length;
 
-            for (var i = 0; i < n; i++)
+            for (int i = 0; i < n; i++)
             {
-                var next = (i + 1) % n;
+                int next = (i + 1) % n;
 
-                var t1 = topRing[i];
-                var t2 = topRing[next];
-                var b1 = bottomRing[i];
-                var b2 = bottomRing[next];
+                float3 t1 = topRing[i];
+                float3 t2 = topRing[next];
+                float3 b1 = bottomRing[i];
+                float3 b2 = bottomRing[next];
 
                 // Вычисляем нормаль для грани
-                var dir = t2 - t1;
-                var down = b1 - t1;
-                var normal = math.normalize(math.cross(down, dir));
+                float3 dir = t2 - t1;
+                float3 down = b1 - t1;
+                float3 normal = math.normalize(math.cross(down, dir));
 
                 // 4 Вершины
                 vertexBuffer[vIndex + 0] = new SimpleVertex { Position = t1, Normal = normal, UV = new float2(0, 1) };
@@ -71,7 +71,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 vertexBuffer[vIndex + 3] = new SimpleVertex { Position = b1, Normal = normal, UV = new float2(0, 0) };
 
                 // 2 Треугольника
-                var baseV = vIndex;
+                int baseV = vIndex;
                 indexBuffer[iIndex++] = baseV + 0;
                 indexBuffer[iIndex++] = baseV + 1;
                 indexBuffer[iIndex++] = baseV + 2;
@@ -97,16 +97,16 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             ref int vIndex,
             ref int iIndex)
         {
-            var baseV = vIndex;
+            int baseV = vIndex;
 
             // Копируем вершины
-            for (var i = 0; i < ring.Length; i++)
+            for (int i = 0; i < ring.Length; i++)
             {
-                var pos = ring[i];
+                float3 pos = ring[i];
                 // Добавляем шум если нужно
                 if (noiseAmp > 0)
                 {
-                    var n = noise.snoise(new float2(pos.x, pos.z) * 0.2f);
+                    float n = noise.snoise(new float2(pos.x, pos.z) * 0.2f);
                     pos.y += n * noiseAmp;
                 }
 
@@ -125,7 +125,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             // Но кольца Inset могут слегка сбить это. Для безопасности используем Fan, если полигон выпуклый.
             // Ячейки Вороного всегда выпуклые (почти).
 
-            for (var i = 1; i < ring.Length - 1; i++)
+            for (int i = 1; i < ring.Length - 1; i++)
             {
                 indexBuffer[iIndex++] = baseV + 0;
                 indexBuffer[iIndex++] = baseV + i + 1;

@@ -19,13 +19,13 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
 
         public void Execute()
         {
-            var count = Cells.Length;
+            int count = Cells.Length;
 
             // --- ЭТАП 1: ПОИСК СТОКА (Куда течет?) ---
-            for (var i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
-                var tectonic = Tectonics[i];
-                var climate = Climate[i];
+                TectonicPlateData tectonic = Tectonics[i];
+                ClimateData climate = Climate[i];
 
                 if (tectonic.IsOcean || tectonic.BaseHeight <= 0.001f)
                 {
@@ -34,31 +34,31 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                 }
 
                 // Базовый поток от осадков
-                var initialFlux = climate.Moisture * 0.5f;
+                float initialFlux = climate.Moisture * 0.5f;
                 if (tectonic.BaseHeight > 0.8f && climate.Temperature < 0.35f) initialFlux += 2.0f; // Ледник
                 if (tectonic.BaseHeight < 0.3f && climate.Moisture > 0.7f) initialFlux += 1.0f; // Болото
 
                 // --- 1. Поиск строгого спуска (Downhill) ---
-                var bestNeighbor = -1;
-                var maxSlope = -1.0f;
+                int bestNeighbor = -1;
+                float maxSlope = -1.0f;
 
                 // Переменные для запасного плана (Spillover)
-                var lowestNeighborIndex = -1;
-                var lowestNeighborHeight = float.MaxValue;
+                int lowestNeighborIndex = -1;
+                float lowestNeighborHeight = float.MaxValue;
 
-                if (NeighborsMap.TryGetFirstValue(i, out var nInfo, out var it))
+                if (NeighborsMap.TryGetFirstValue(i, out NeighborInfo nInfo, out NativeParallelMultiHashMapIterator<int> it))
                     do
                     {
                         if (nInfo.Index >= count) continue;
 
-                        var nHeight = Tectonics[nInfo.Index].BaseHeight;
+                        float nHeight = Tectonics[nInfo.Index].BaseHeight;
                         if (Tectonics[nInfo.Index].IsOcean) nHeight = 0;
 
                         // Поиск обычного спуска
                         if (nHeight < tectonic.BaseHeight)
                         {
-                            var drop = tectonic.BaseHeight - nHeight;
-                            var slope = drop / math.max(0.1f, nInfo.Distance);
+                            float drop = tectonic.BaseHeight - nHeight;
+                            float slope = drop / math.max(0.1f, nInfo.Distance);
 
                             if (slope > maxSlope)
                             {
@@ -75,7 +75,7 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                         }
                     } while (NeighborsMap.TryGetNextValue(out nInfo, ref it));
 
-                var isStuck = bestNeighbor == -1;
+                bool isStuck = bestNeighbor == -1;
 
                 // --- 2. Логика Перелива (Spillover) ---
                 // Если мы застряли (нет спуска), но у нас есть соседи — течем в самого низкого из них.
@@ -105,24 +105,24 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
             // поэтому вода в озерах может не накопить полный объем за один проход, 
             // но для визуализации связности этого достаточно.
 
-            var sortedIndices = new NativeArray<int>(count, Allocator.Temp);
-            for (var i = 0; i < count; i++) sortedIndices[i] = i;
+            NativeArray<int> sortedIndices = new NativeArray<int>(count, Allocator.Temp);
+            for (int i = 0; i < count; i++) sortedIndices[i] = i;
             sortedIndices.Sort(new HeightComparer { Tectonics = Tectonics });
 
-            for (var k = 0; k < count; k++)
+            for (int k = 0; k < count; k++)
             {
-                var i = sortedIndices[k];
-                var hSource = Hydrology[i];
+                int i = sortedIndices[k];
+                HydrologyData hSource = Hydrology[i];
                 if (hSource.IsOcean) continue;
 
-                var targetIdx = hSource.FlowTargetIndex;
+                int targetIdx = hSource.FlowTargetIndex;
 
                 // --- ЗАЩИТА ОТ ЦИКЛОВ (Ping-Pong) ---
                 // Если ячейка А течет в Б, а Б течет в А — это бесконечный цикл.
                 // Просто не передаем flux, чтобы не было переполнения, но связь оставляем.
                 if (targetIdx != -1)
                 {
-                    var hTarget = Hydrology[targetIdx];
+                    HydrologyData hTarget = Hydrology[targetIdx];
                     if (hTarget.FlowTargetIndex == i)
                         // Обнаружен цикл с соседом! Прерываем накопление Flux, но оставляем геометрию.
                         continue;
@@ -152,9 +152,9 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
             }
 
             // --- ЭТАП 3: ФЛАГИ VISIBILITY ---
-            for (var i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
-                var h = Hydrology[i];
+                HydrologyData h = Hydrology[i];
                 if (!h.IsOcean)
                 {
                     // ПОРОГ РЕКИ

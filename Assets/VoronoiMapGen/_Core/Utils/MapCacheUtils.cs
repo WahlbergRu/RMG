@@ -41,18 +41,18 @@ namespace VoronoiMapGen.Utils
             geomCounts = default;
             geomEdges = default;
 
-            var path = GetPath(seed, level);
+            string path = GetPath(seed, level);
             if (!File.Exists(path)) return false;
 
             try
             {
-                using (var stream = new FileStream(path, FileMode.Open))
-                using (var reader = new BinaryReader(stream))
+                using (FileStream stream = new FileStream(path, FileMode.Open))
+                using (BinaryReader reader = new BinaryReader(stream))
                 {
-                    var version = reader.ReadInt32();
+                    int version = reader.ReadInt32();
                     if (version != CurrentVersion) return false;
 
-                    var count = reader.ReadInt32();
+                    int count = reader.ReadInt32();
 
                     // 1. Основные данные
                     sites = new NativeArray<float2>(count, Allocator.Persistent);
@@ -62,9 +62,9 @@ namespace VoronoiMapGen.Utils
                     hydro = new NativeArray<HydrologyData>(count, Allocator.Persistent);
                     biomes = new NativeArray<BiomeData>(count, Allocator.Persistent);
 
-                    for (var i = 0; i < count; i++) sites[i] = new float2(reader.ReadSingle(), reader.ReadSingle());
+                    for (int i = 0; i < count; i++) sites[i] = new float2(reader.ReadSingle(), reader.ReadSingle());
 
-                    for (var i = 0; i < count; i++)
+                    for (int i = 0; i < count; i++)
                         meta[i] = new VoronoiSite
                         {
                             Index = reader.ReadInt32(),
@@ -74,13 +74,13 @@ namespace VoronoiMapGen.Utils
                             Position = sites[i]
                         };
 
-                    for (var i = 0; i < count; i++)
+                    for (int i = 0; i < count; i++)
                         tectonic[i] = new TectonicPlateData
                             { IsOcean = reader.ReadBoolean(), BaseHeight = reader.ReadSingle() };
-                    for (var i = 0; i < count; i++)
+                    for (int i = 0; i < count; i++)
                         climate[i] = new ClimateData
                             { Temperature = reader.ReadSingle(), Moisture = reader.ReadSingle() };
-                    for (var i = 0; i < count; i++)
+                    for (int i = 0; i < count; i++)
                         hydro[i] = new HydrologyData
                         {
                             FlowTargetIndex = reader.ReadInt32(),
@@ -89,21 +89,21 @@ namespace VoronoiMapGen.Utils
                             IsLake = reader.ReadBoolean(),
                             IsOcean = reader.ReadBoolean()
                         };
-                    for (var i = 0; i < count; i++) biomes[i] = new BiomeData { Type = (BiomeType)reader.ReadInt32() };
+                    for (int i = 0; i < count; i++) biomes[i] = new BiomeData { Type = (BiomeType)reader.ReadInt32() };
 
                     // 2. ГЕОМЕТРИЯ (НОВОЕ)
-                    var vertCount = reader.ReadInt32();
+                    int vertCount = reader.ReadInt32();
                     geomVerts = new NativeArray<float2>(vertCount, Allocator.Persistent);
-                    for (var i = 0; i < vertCount; i++)
+                    for (int i = 0; i < vertCount; i++)
                         geomVerts[i] = new float2(reader.ReadSingle(), reader.ReadSingle());
 
-                    var countsCount = reader.ReadInt32();
+                    int countsCount = reader.ReadInt32();
                     geomCounts = new NativeArray<int>(countsCount, Allocator.Persistent);
-                    for (var i = 0; i < countsCount; i++) geomCounts[i] = reader.ReadInt32();
+                    for (int i = 0; i < countsCount; i++) geomCounts[i] = reader.ReadInt32();
 
-                    var edgesCount = reader.ReadInt32();
+                    int edgesCount = reader.ReadInt32();
                     geomEdges = new NativeArray<VoronoiEdge>(edgesCount, Allocator.Persistent);
-                    for (var i = 0; i < edgesCount; i++)
+                    for (int i = 0; i < edgesCount; i++)
                         // Сохраняем только данные (без Entity ссылок, они не валидны при перезагрузке)
                         geomEdges[i] = new VoronoiEdge
                         {
@@ -149,39 +149,39 @@ namespace VoronoiMapGen.Utils
             NativeList<int> geomCounts,
             NativeList<VoronoiEdge> geomEdges)
         {
-            var path = GetPath(seed, level);
-            using (var stream = new FileStream(path, FileMode.Create))
-            using (var writer = new BinaryWriter(stream))
+            string path = GetPath(seed, level);
+            using (FileStream stream = new FileStream(path, FileMode.Create))
+            using (BinaryWriter writer = new BinaryWriter(stream))
             {
                 writer.Write(CurrentVersion);
                 writer.Write(sites.Length);
 
-                for (var i = 0; i < sites.Length; i++)
+                for (int i = 0; i < sites.Length; i++)
                 {
                     writer.Write(sites[i].x);
                     writer.Write(sites[i].y);
                 }
 
-                for (var i = 0; i < meta.Length; i++)
+                for (int i = 0; i < meta.Length; i++)
                 {
                     writer.Write(meta[i].Index);
                     writer.Write(meta[i].ParentIndex);
                     writer.Write(meta[i].Value);
                 }
 
-                for (var i = 0; i < tectonic.Length; i++)
+                for (int i = 0; i < tectonic.Length; i++)
                 {
                     writer.Write(tectonic[i].IsOcean);
                     writer.Write(tectonic[i].BaseHeight);
                 }
 
-                for (var i = 0; i < climate.Length; i++)
+                for (int i = 0; i < climate.Length; i++)
                 {
                     writer.Write(climate[i].Temperature);
                     writer.Write(climate[i].Moisture);
                 }
 
-                for (var i = 0; i < hydro.Length; i++)
+                for (int i = 0; i < hydro.Length; i++)
                 {
                     writer.Write(hydro[i].FlowTargetIndex);
                     writer.Write(hydro[i].Flux);
@@ -190,23 +190,23 @@ namespace VoronoiMapGen.Utils
                     writer.Write(hydro[i].IsOcean);
                 }
 
-                for (var i = 0; i < biomes.Length; i++) writer.Write((int)biomes[i].Type);
+                for (int i = 0; i < biomes.Length; i++) writer.Write((int)biomes[i].Type);
 
                 // 2. ГЕОМЕТРИЯ
                 writer.Write(geomVerts.Length);
-                for (var i = 0; i < geomVerts.Length; i++)
+                for (int i = 0; i < geomVerts.Length; i++)
                 {
                     writer.Write(geomVerts[i].x);
                     writer.Write(geomVerts[i].y);
                 }
 
                 writer.Write(geomCounts.Length);
-                for (var i = 0; i < geomCounts.Length; i++) writer.Write(geomCounts[i]);
+                for (int i = 0; i < geomCounts.Length; i++) writer.Write(geomCounts[i]);
 
                 writer.Write(geomEdges.Length);
-                for (var i = 0; i < geomEdges.Length; i++)
+                for (int i = 0; i < geomEdges.Length; i++)
                 {
-                    var e = geomEdges[i];
+                    VoronoiEdge e = geomEdges[i];
                     writer.Write(e.SiteA);
                     writer.Write(e.SiteB);
                     writer.Write(e.VertexA.x);

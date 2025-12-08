@@ -25,7 +25,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
         public void CleanupResources(bool unused = false)
         {
-            var q = EntityManager.CreateEntityQuery(typeof(RiverChunkTag));
+            EntityQuery q = EntityManager.CreateEntityQuery(typeof(RiverChunkTag));
             if (!q.IsEmpty) EntityManager.DestroyEntity(q);
         }
 
@@ -36,11 +36,11 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
         protected override void OnUpdate()
         {
-            if (!SystemAPI.TryGetSingleton<MapSettings>(out var settings)) return;
+            if (!SystemAPI.TryGetSingleton<MapSettings>(out MapSettings settings)) return;
 
-            var changed = settings.RiverRenderMask != _lastRiverMask ||
-                          settings.RenderLevelMask != _lastTerrainMask ||
-                          settings.ShowRivers != _lastShowRivers;
+            bool changed = settings.RiverRenderMask != _lastRiverMask ||
+                           settings.RenderLevelMask != _lastTerrainMask ||
+                           settings.ShowRivers != _lastShowRivers;
 
             _lastRiverMask = settings.RiverRenderMask;
             _lastTerrainMask = settings.RenderLevelMask;
@@ -51,20 +51,20 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
             if (!settings.ShowRivers) return;
 
-            var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
+            Entity settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
             if (!EntityManager.HasBuffer<TerrainVisualData>(settingsEntity)) return;
-            var styles = EntityManager.GetBuffer<TerrainVisualData>(settingsEntity).ToNativeArray(Allocator.TempJob);
+            NativeArray<TerrainVisualData> styles = EntityManager.GetBuffer<TerrainVisualData>(settingsEntity).ToNativeArray(Allocator.TempJob);
 
             try
             {
-                var vList = new NativeList<ProceduralVertex>(Allocator.Temp);
-                var iList = new NativeList<ProceduralIndex>(Allocator.Temp);
+                NativeList<ProceduralVertex> vList = new NativeList<ProceduralVertex>(Allocator.Temp);
+                NativeList<ProceduralIndex> iList = new NativeList<ProceduralIndex>(Allocator.Temp);
 
                 RiverMeshBuilder_ECS.BuildToNativeList(EntityManager, settings, styles, vList, iList);
 
                 if (vList.Length > 0)
                 {
-                    var riverArchetype = EntityManager.CreateArchetype(
+                    EntityArchetype riverArchetype = EntityManager.CreateArchetype(
                         typeof(RiverChunkTag),
                         typeof(ProceduralMeshReference),
                         typeof(ProceduralVertex),
@@ -76,11 +76,11 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                         typeof(UnifiedRenderTag)
                     );
 
-                    var riverChunk = EntityManager.CreateEntity(riverArchetype);
+                    Entity riverChunk = EntityManager.CreateEntity(riverArchetype);
                     EntityManager.SetName(riverChunk, "Global_River_Network");
 
-                    var vBuf = EntityManager.GetBuffer<ProceduralVertex>(riverChunk);
-                    var iBuf = EntityManager.GetBuffer<ProceduralIndex>(riverChunk);
+                    DynamicBuffer<ProceduralVertex> vBuf = EntityManager.GetBuffer<ProceduralVertex>(riverChunk);
+                    DynamicBuffer<ProceduralIndex> iBuf = EntityManager.GetBuffer<ProceduralIndex>(riverChunk);
 
                     vBuf.AddRange(vList.AsArray());
                     iBuf.AddRange(iList.AsArray());

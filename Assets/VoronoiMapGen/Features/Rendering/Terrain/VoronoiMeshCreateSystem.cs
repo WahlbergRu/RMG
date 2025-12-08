@@ -48,35 +48,27 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
             if (!EntityManager.HasBuffer<TerrainVisualData>(settingsEntity)) return;
 
-            // --- FIX: Добавлен компонент CellBiome в запрос ---
-            // Если мы собираемся читать CellBiome через этот query, он обязан быть здесь.
             var query = SystemAPI.QueryBuilder()
-                .WithAll<VoronoiCell, CellBiome, CellPolygonVertex, DetailLevelData>() 
+                .WithAll<VoronoiCell, CellBiome, CellPolygonVertex, DetailLevelData>()
                 .WithNone<VoronoiCellMeshTag>()
                 .Build();
 
             if (query.IsEmpty) return;
-            
-            // Сортировка по порядку (LOD) полезна для последовательного чанкинга
-            query.SetOrderVersionFilter(); 
+            query.SetOrderVersionFilter();
 
             var stylesBuffer = EntityManager.GetBuffer<TerrainVisualData>(settingsEntity);
             var styles = stylesBuffer.ToNativeArray(Allocator.TempJob);
 
             try
             {
-                // 1. DATA GATHERING
-                // Получаем все компоненты через Query (теперь это безопасно, т.к. все типы указаны в WithAll)
                 using var entities = query.ToEntityArray(Allocator.TempJob);
                 var cells = query.ToComponentDataArray<VoronoiCell>(Allocator.TempJob);
                 var biomes = query.ToComponentDataArray<CellBiome>(Allocator.TempJob);
                 var levels = query.ToComponentDataArray<DetailLevelData>(Allocator.TempJob);
-
                 var bufferLookup = SystemAPI.GetBufferLookup<CellPolygonVertex>(true);
 
                 int cellCount = entities.Length;
 
-                // Для параллельных джоб создаем Flattened (плоские) копии данных
                 var cellCentroids = new NativeArray<float2>(cellCount, Allocator.TempJob);
                 var cellBiomesFlat = new NativeArray<CellBiome>(cellCount, Allocator.TempJob);
                 var cellLevelsFlat = new NativeArray<int>(cellCount, Allocator.TempJob);
@@ -86,8 +78,6 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 var polyCounts = new NativeArray<int>(cellCount, Allocator.TempJob);
 
                 int currentPolyOffset = 0;
-                
-                // Перепаковка данных (Main Thread, быстрая последовательная операция)
                 for (int i = 0; i < cellCount; i++)
                 {
                     Entity e = entities[i];
@@ -99,8 +89,6 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     {
                         var buf = bufferLookup[e];
                         int pCount = buf.Length;
-                        
-                        // Копируем вертексы полигона
                         var rawPtr = buf.AsNativeArray();
                         for(int k=0; k<pCount; k++) flatPolygons.Add(rawPtr[k].Value);
                         
@@ -115,29 +103,23 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     }
                 }
                 
-                // Освобождаем массивы от Query, так как мы скопировали данные в массивы для Job
-                cells.Dispose(); 
-                biomes.Dispose(); 
-                levels.Dispose();
+                cells.Dispose(); biomes.Dispose(); levels.Dispose();
 
-                // 2. CALC SIZES (Parallel Job)
                 var meshCounts = new NativeArray<int2>(cellCount, Allocator.TempJob);
                 
-                var calcJob = new CalcSizeJob
+                new CalcSizeJob
                 {
                     Levels = cellLevelsFlat,
                     PolygonCounts = polyCounts,
                     Biomes = cellBiomesFlat,
                     Styles = styles,
                     OutputCounts = meshCounts
-                };
-                calcJob.Schedule(cellCount, 64).Complete();
+                }.Schedule(cellCount, 64).Complete();
                 
                 var totalVerts = 0;
                 var totalInds = 0;
                 var cellWriteOffsets = new NativeArray<int2>(cellCount, Allocator.TempJob);
                 
-                // Prefix Sum
                 for(int i=0; i<cellCount; i++)
                 {
                     cellWriteOffsets[i] = new int2(totalVerts, totalInds);
@@ -145,11 +127,10 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     totalInds += meshCounts[i].y;
                 }
 
-                // 3. GENERATION (Parallel Job)
                 var outGlobalVerts = new NativeArray<ProceduralVertex>(totalVerts, Allocator.TempJob);
                 var outGlobalInds = new NativeArray<ProceduralIndex>(totalInds, Allocator.TempJob);
                 
-                var genJob = new GenerateMeshJob
+                new GenerateMeshJob
                 {
                     Centroids = cellCentroids,
                     Biomes = cellBiomesFlat,
@@ -161,23 +142,19 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     WriteOffsets = cellWriteOffsets,
                     OutVerts = outGlobalVerts,
                     OutInds = outGlobalInds
-                };
-                genJob.Schedule(cellCount, 64).Complete();
+                }.Schedule(cellCount, 64).Complete();
                 
-                // 4. BATCH & FLUSH (Main Thread)
                 var chunkV = new NativeList<ProceduralVertex>(CELLS_PER_CHUNK * 20, Allocator.Temp);
                 var chunkI = new NativeList<ProceduralIndex>(CELLS_PER_CHUNK * 60, Allocator.Temp);
                 var batchedEntities = new NativeList<Entity>(CELLS_PER_CHUNK, Allocator.Temp);
                 
                 int currentLvl = -1;
-                
                 for(int i=0; i<cellCount; i++)
                 {
                     var countData = meshCounts[i];
                     if (countData.x == 0) continue; 
                     
                     int entityLvl = cellLevelsFlat[i];
-                    
                     bool isFull = batchedEntities.Length >= CELLS_PER_CHUNK;
                     bool isDiffLevel = (currentLvl != -1 && currentLvl != entityLvl);
                     
@@ -185,7 +162,6 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     {
                         FlushToChunk(chunkV, chunkI, currentLvl, settings.RenderLevelMask);
                         chunkV.Clear(); chunkI.Clear();
-                        
                         EntityManager.AddComponent<VoronoiCellMeshTag>(batchedEntities.AsArray());
                         batchedEntities.Clear();
                     }
@@ -193,31 +169,23 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     currentLvl = entityLvl;
                     batchedEntities.Add(entities[i]);
                     
-                    // Copy results from big Job array to Chunk buffer
                     int2 offset = cellWriteOffsets[i];
-                    int vLen = countData.x;
-                    int iLen = countData.y;
-                    
                     int chunkBaseIndex = chunkV.Length;
+                    chunkV.AddRange(outGlobalVerts.GetSubArray(offset.x, countData.x));
                     
-                    chunkV.AddRange(outGlobalVerts.GetSubArray(offset.x, vLen));
-                    
-                    // Remap indices
-                    var iSlice = outGlobalInds.GetSubArray(offset.y, iLen);
-                    for(int k=0; k<iLen; k++)
+                    var iSlice = outGlobalInds.GetSubArray(offset.y, countData.y);
+                    for(int k=0; k<countData.y; k++)
                     {
                         chunkI.Add(new ProceduralIndex { Value = iSlice[k].Value + chunkBaseIndex });
                     }
                 }
                 
-                // Final flush
                 if (batchedEntities.Length > 0)
                 {
                     FlushToChunk(chunkV, chunkI, currentLvl, settings.RenderLevelMask);
                     EntityManager.AddComponent<VoronoiCellMeshTag>(batchedEntities.AsArray());
                 }
                 
-                // Cleanup Locals
                 cellCentroids.Dispose(); cellBiomesFlat.Dispose(); cellLevelsFlat.Dispose();
                 flatPolygons.Dispose(); polyOffsets.Dispose(); polyCounts.Dispose();
                 meshCounts.Dispose(); cellWriteOffsets.Dispose();
@@ -244,7 +212,6 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             EntityManager.SetComponentData(chunkEntity, new DetailLevelData { Level = (DetailLevel)level });
             EntityManager.SetComponentData(chunkEntity, new LocalToWorld { Value = float4x4.identity });
             EntityManager.SetComponentData(chunkEntity, new RenderBounds { Value = new AABB { Extents = new float3(50000, 10000, 50000) } });
-            
             EntityManager.SetComponentEnabled<MeshDirtyTag>(chunkEntity, true);
 
             var vBuf = EntityManager.GetBuffer<ProceduralVertex>(chunkEntity);
@@ -252,7 +219,6 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             
             vBuf.ResizeUninitialized(v.Length);
             iBuf.ResizeUninitialized(i.Length);
-            
             vBuf.AsNativeArray().CopyFrom(v.AsArray());
             iBuf.AsNativeArray().CopyFrom(i.AsArray());
 
@@ -277,7 +243,8 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 var style = Styles[lvlIdx];
                 bool isWater = Biomes[i].Type == BiomeType.Ocean;
 
-                TerrainGeometryBuilder.CalculateLayout(pCount, style, isWater, out int v, out int ind);
+                // Передаем style через IN
+                TerrainGeometryBuilder.CalculateLayout(pCount, in style, isWater, out int v, out int ind);
                 OutputCounts[i] = new int2(v, ind);
             }
         }
@@ -288,11 +255,9 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             [ReadOnly] public NativeArray<float2> Centroids;
             [ReadOnly] public NativeArray<CellBiome> Biomes;
             [ReadOnly] public NativeArray<int> Levels;
-            
             [ReadOnly] public NativeArray<float3> FlatPolygons;
             [ReadOnly] public NativeArray<int> PolyOffsets;
             [ReadOnly] public NativeArray<int> PolyCounts;
-            
             [ReadOnly] public NativeArray<TerrainVisualData> Styles;
             [ReadOnly] public NativeArray<int2> WriteOffsets;
             
@@ -325,24 +290,27 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 };
 
                 int2 offsets = WriteOffsets[i];
-                int vStart = offsets.x;
-                int iStart = offsets.y;
-                
                 int polyStart = PolyOffsets[i];
+                // HACK: Recreating Slice using pointer magic would be unsafe in C# without UnsafeUtility, 
+                // but NativeArray supports GetSubArray which is what we need.
+                // We are passing a "flat" array, so in BuildGeometry we pass the SubArray.
+                // However, BuildGeometry expects `NativeArray<float3>`. GetSubArray returns `NativeArray<float3>`, so it fits!
+                
+                // IMPORTANT: Since `FlatPolygons` is read-only in this job, GetSubArray creates a view.
+                // But `FillMesh` accepts `NativeArray<float3>` (not ReadOnly explicitly in signature to allow passing this view easily).
+                
+                // If the builder signature is `NativeArray<float3> input`, passing `GetSubArray` works.
                 var polySlice = FlatPolygons.GetSubArray(polyStart, pCount);
 
-                // Scratchpad (allocated in temp, job specific thread safe)
                 var ringA = new NativeList<float3>(32, Allocator.Temp);
                 var ringB = new NativeList<float3>(32, Allocator.Temp);
                 
-                // Для записи нам нужно снова рассчитать длину для получения Slice нужного размера.
-                // Либо передавать размер через дополнительный массив, либо посчитать еще раз (быстрее передать чем хранить лишнюю память)
-                TerrainGeometryBuilder.CalculateLayout(pCount, style, isWater, out int vLen, out int iLen);
+                TerrainGeometryBuilder.CalculateLayout(pCount, in style, isWater, out int vLen, out int iLen);
                 
-                var vTarget = OutVerts.GetSubArray(vStart, vLen);
-                var iTarget = OutInds.GetSubArray(iStart, iLen);
+                var vTarget = OutVerts.GetSubArray(offsets.x, vLen);
+                var iTarget = OutInds.GetSubArray(offsets.y, iLen);
                 
-                TerrainGeometryBuilder.FillMesh(vTarget, iTarget, polySlice, ctx, ref ringA, ref ringB);
+                TerrainGeometryBuilder.FillMesh(vTarget, iTarget, polySlice, in ctx, ref ringA, ref ringB);
             }
         }
     }

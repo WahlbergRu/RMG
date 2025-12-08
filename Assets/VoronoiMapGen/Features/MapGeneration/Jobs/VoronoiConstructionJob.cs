@@ -38,7 +38,7 @@ namespace VoronoiMapGen.Features.MapGeneration
         {
             // 1. Генерация ячеек (это быстро, оставляем как есть)
             // ВАЖНО: Мы предполагаем, что Sites идут по порядку индексов от 0 до N
-            for (var i = 0; i < Sites.Length; i++)
+            for (int i = 0; i < Sites.Length; i++)
                 Cells.Add(new VoronoiCell
                 {
                     SiteIndex = i,
@@ -51,12 +51,12 @@ namespace VoronoiMapGen.Features.MapGeneration
 
             // 2. УМНАЯ Генерация ребер (Sort & Scan)
             // У каждого треугольника 3 грани. 
-            var capacity = Triangles.Length * 3;
-            var edgeEntries = new NativeList<EdgeEntry>(capacity, Allocator.Temp);
+            int capacity = Triangles.Length * 3;
+            NativeList<EdgeEntry> edgeEntries = new NativeList<EdgeEntry>(capacity, Allocator.Temp);
 
-            for (var i = 0; i < Triangles.Length; i++)
+            for (int i = 0; i < Triangles.Length; i++)
             {
-                var t = Triangles[i];
+                DelaunayTriangle t = Triangles[i];
 
                 // Добавляем 3 грани треугольника в список
                 AddEdgeEntry(ref edgeEntries, t.A, t.B, i, t.CircumCenter);
@@ -70,10 +70,10 @@ namespace VoronoiMapGen.Features.MapGeneration
             // Проход по отсортированному списку
             // Если мы встречаем две записи с одинаковыми EdgeNodes (например 5-12 и 5-12),
             // значит, эти два треугольника - соседи. Соединяем их центры ребром.
-            for (var i = 0; i < edgeEntries.Length - 1; i++)
+            for (int i = 0; i < edgeEntries.Length - 1; i++)
             {
-                var entryA = edgeEntries[i];
-                var entryB = edgeEntries[i + 1];
+                EdgeEntry entryA = edgeEntries[i];
+                EdgeEntry entryB = edgeEntries[i + 1];
 
                 // Проверяем, совпадают ли грани (Sites)
                 if (entryA.EdgeNodes.Equals(entryB.EdgeNodes))
@@ -104,8 +104,8 @@ namespace VoronoiMapGen.Features.MapGeneration
         private void AddEdgeEntry(ref NativeList<EdgeEntry> list, int a, int b, int triIndex, float2 center)
         {
             // Всегда храним индексы как (min, max), чтобы грань 1-2 и 2-1 считалась одинаковой
-            var min = math.min(a, b);
-            var max = math.max(a, b);
+            int min = math.min(a, b);
+            int max = math.max(a, b);
 
             list.Add(new EdgeEntry
             {

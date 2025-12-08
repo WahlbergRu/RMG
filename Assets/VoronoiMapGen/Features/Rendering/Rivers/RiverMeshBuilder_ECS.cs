@@ -17,7 +17,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             NativeList<ProceduralIndex> iList
         )
         {
-            var query = em.CreateEntityQuery(
+            EntityQuery query = em.CreateEntityQuery(
                 ComponentType.ReadOnly<VoronoiCell>(),
                 ComponentType.ReadOnly<HydrologyData>(),
                 ComponentType.ReadOnly<DetailLevelData>(),
@@ -26,60 +26,60 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
             if (query.IsEmpty) return;
 
-            using var entities = query.ToEntityArray(Allocator.Temp);
-            using var cells = query.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
-            using var hydro = query.ToComponentDataArray<HydrologyData>(Allocator.Temp);
-            using var biomes = query.ToComponentDataArray<CellBiome>(Allocator.Temp);
-            using var levels = query.ToComponentDataArray<DetailLevelData>(Allocator.Temp);
+            using NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp);
+            using NativeArray<VoronoiCell> cells = query.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
+            using NativeArray<HydrologyData> hydro = query.ToComponentDataArray<HydrologyData>(Allocator.Temp);
+            using NativeArray<CellBiome> biomes = query.ToComponentDataArray<CellBiome>(Allocator.Temp);
+            using NativeArray<DetailLevelData> levels = query.ToComponentDataArray<DetailLevelData>(Allocator.Temp);
 
-            var siteMap = new NativeParallelHashMap<int, int>(cells.Length, Allocator.Temp);
-            for (var i = 0; i < cells.Length; i++)
+            NativeParallelHashMap<int, int> siteMap = new NativeParallelHashMap<int, int>(cells.Length, Allocator.Temp);
+            for (int i = 0; i < cells.Length; i++)
             {
-                var lvl = (int)levels[i].Level;
-                var uniqueKey = (lvl << 24) + cells[i].SiteIndex;
+                int lvl = (int)levels[i].Level;
+                int uniqueKey = (lvl << 24) + cells[i].SiteIndex;
                 siteMap.TryAdd(uniqueKey, i);
             }
 
-            var renderMask = settings.RiverRenderMask;
+            int renderMask = settings.RiverRenderMask;
             
             // Цвет рек (Синий)
-            var riverColor = new float4(0.0f, 0.4f, 0.9f, 0.9f);
+            float4 riverColor = new float4(0.0f, 0.4f, 0.9f, 0.9f);
 
-            var tempVerts = new NativeList<float3>(256, Allocator.Temp);
-            var tempTris = new NativeList<int>(1024, Allocator.Temp);
-            var tempUVs = new NativeList<float2>(256, Allocator.Temp);
+            NativeList<float3> tempVerts = new NativeList<float3>(256, Allocator.Temp);
+            NativeList<int> tempTris = new NativeList<int>(1024, Allocator.Temp);
+            NativeList<float2> tempUVs = new NativeList<float2>(256, Allocator.Temp);
 
-            for (var i = 0; i < entities.Length; i++)
+            for (int i = 0; i < entities.Length; i++)
             {
-                var h = hydro[i];
+                HydrologyData h = hydro[i];
                 if (!h.IsRiver || h.FlowTargetIndex == -1) continue;
                 if (biomes[i].Type == BiomeType.Ocean) continue;
 
-                var currentLvl = (int)levels[i].Level;
+                int currentLvl = (int)levels[i].Level;
                 if ((renderMask & (1 << currentLvl)) == 0) continue;
 
-                var targetUniqueKey = (currentLvl << 24) + h.FlowTargetIndex;
-                if (!siteMap.TryGetValue(targetUniqueKey, out var nIdx)) continue;
+                int targetUniqueKey = (currentLvl << 24) + h.FlowTargetIndex;
+                if (!siteMap.TryGetValue(targetUniqueKey, out int nIdx)) continue;
 
-                var safeStyleIdx = RiverBuilderUtils.GetSafeStyleIndex((DetailLevel)currentLvl, styles.Length);
-                var myStyle = styles[safeStyleIdx];
+                int safeStyleIdx = RiverBuilderUtils.GetSafeStyleIndex((DetailLevel)currentLvl, styles.Length);
+                TerrainVisualData myStyle = styles[safeStyleIdx];
 
                 // Heights
-                var gA = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[i], myStyle.HeightScale);
-                var gB = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[nIdx], myStyle.HeightScale);
+                float gA = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[i], myStyle.HeightScale);
+                float gB = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[nIdx], myStyle.HeightScale);
 
                 bool targetIsOcean = biomes[nIdx].Type == BiomeType.Ocean;
 
                 if (biomes[i].Type == BiomeType.Ocean) gA = 0.2f;
                 if (targetIsOcean) gB = 0.2f;
 
-                var yOffset = 0.15f + myStyle.TopNoiseAmplitude * 0.6f;
-                var yA = gA + yOffset;
-                var yB = gB + yOffset;
+                float yOffset = 0.15f + myStyle.TopNoiseAmplitude * 0.6f;
+                float yA = gA + yOffset;
+                float yB = gB + yOffset;
 
                 // --- COORDINATES CALCULATION ---
-                var pStart2D = cells[i].Centroid;
-                var pEnd2D = cells[nIdx].Centroid;
+                float2 pStart2D = cells[i].Centroid;
+                float2 pEnd2D = cells[nIdx].Centroid;
 
                 // <--- COASTLINE FIX: Остановка реки на границе берега --->
                 // В Вороном граница (ребро) всегда лежит ровно посередине между двумя сайтами.
@@ -89,8 +89,8 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                     pEnd2D = (pStart2D + pEnd2D) * 0.5f;
                 }
 
-                var start = new float3(pStart2D.x, yA, pStart2D.y);
-                var end = new float3(pEnd2D.x, yB, pEnd2D.y);
+                float3 start = new float3(pStart2D.x, yA, pStart2D.y);
+                float3 end = new float3(pEnd2D.x, yB, pEnd2D.y);
 
                 // --- VALIDATION ---
                 if (!RiverBuilderUtils.IsFinite(start) || !RiverBuilderUtils.IsFinite(end)) continue;
@@ -98,12 +98,12 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                 if (math.abs(yA - yB) > RiverBuilderUtils.MAX_HEIGHT_DIFF) continue;
 
                 // Widths
-                var fluxA = math.max(0, h.Flux);
-                var fluxB = math.max(0, hydro[nIdx].Flux);
-                var hierarchyBonus = 1.0f + math.max(0, 3 - currentLvl) * 0.2f;
-                var configWidthScale = myStyle.RiverWidthScale;
-                var wA = math.clamp(math.sqrt(fluxA) * hierarchyBonus * configWidthScale, 2.0f, 120.0f);
-                var wB = math.clamp(math.sqrt(fluxB) * hierarchyBonus * configWidthScale, 2.0f, 120.0f);
+                float fluxA = math.max(0, h.Flux);
+                float fluxB = math.max(0, hydro[nIdx].Flux);
+                float hierarchyBonus = 1.0f + math.max(0, 3 - currentLvl) * 0.2f;
+                float configWidthScale = myStyle.RiverWidthScale;
+                float wA = math.clamp(math.sqrt(fluxA) * hierarchyBonus * configWidthScale, 2.0f, 120.0f);
+                float wB = math.clamp(math.sqrt(fluxB) * hierarchyBonus * configWidthScale, 2.0f, 120.0f);
                 
                 // Делаем дельту широкой при впадении в море
                 if (targetIsOcean) wB *= 4.0f;
@@ -123,9 +123,9 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
                 if (tempVerts.Length == 0 || !RiverBuilderUtils.ValidateVertices(tempVerts)) continue;
 
-                var baseVertexIndex = vList.Length;
+                int baseVertexIndex = vList.Length;
 
-                for (var v = 0; v < tempVerts.Length; v++)
+                for (int v = 0; v < tempVerts.Length; v++)
                 {
                     vList.Add(new ProceduralVertex
                     {
@@ -136,7 +136,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                     });
                 }
 
-                for (var t = 0; t < tempTris.Length; t++)
+                for (int t = 0; t < tempTris.Length; t++)
                 {
                     iList.Add(new ProceduralIndex { Value = tempTris[t] + baseVertexIndex });
                 }

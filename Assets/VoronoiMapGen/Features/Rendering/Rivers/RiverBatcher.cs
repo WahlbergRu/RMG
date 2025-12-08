@@ -18,7 +18,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             if (verts.Count == 0) return;
 
             // 1. Создаем Unity Mesh
-            var m = new Mesh();
+            Mesh m = new Mesh();
             m.name = "RiverChunk";
             // Позволяем мешу быть большим
             m.indexFormat = IndexFormat.UInt32;
@@ -34,7 +34,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             meshesToTrack.Add(m);
 
             // 3. Создаем ECS Entity
-            var e = em.CreateEntity();
+            Entity e = em.CreateEntity();
             em.AddComponentData(e, new LocalToWorld { Value = float4x4.identity });
             em.AddComponentData(e,
                 new LocalTransform { Position = float3.zero, Rotation = quaternion.identity, Scale = 1.0f });

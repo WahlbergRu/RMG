@@ -20,11 +20,11 @@ namespace VoronoiMapGen.Utils
             triangles.Clear();
 
             // 1. Супер-Треугольник
-            var M = math.max(mapSize.x, mapSize.y) * 1000.0f;
-            var n = points.Length;
+            float M = math.max(mapSize.x, mapSize.y) * 1000.0f;
+            int n = points.Length;
 
             // Временный список точек + 3 вершины супер-треугольника
-            var allPoints = new NativeList<float2>(n + 3, Allocator.Temp);
+            NativeList<float2> allPoints = new NativeList<float2>(n + 3, Allocator.Temp);
             allPoints.AddRange(points);
             allPoints.Add(new float2(-M, -M)); // Index n
             allPoints.Add(new float2(2 * M, -M)); // Index n+1
@@ -34,15 +34,15 @@ namespace VoronoiMapGen.Utils
             triangles.Add(new TriangleIndices { A = n, B = n + 1, C = n + 2, IsBad = false });
 
             // 2. Вставка точек (Bowyer-Watson)
-            for (var i = 0; i < n; i++)
+            for (int i = 0; i < n; i++)
             {
-                var p = points[i];
-                var badTriangles = new NativeList<int>(32, Allocator.Temp);
+                float2 p = points[i];
+                NativeList<int> badTriangles = new NativeList<int>(32, Allocator.Temp);
 
                 // Ищем плохие треугольники
-                for (var t = 0; t < triangles.Length; t++)
+                for (int t = 0; t < triangles.Length; t++)
                 {
-                    var tri = triangles[t];
+                    TriangleIndices tri = triangles[t];
                     if (GeometryMath.IsPointInCircumCircle(p, allPoints[tri.A], allPoints[tri.B], allPoints[tri.C]))
                     {
                         badTriangles.Add(t);
@@ -52,10 +52,10 @@ namespace VoronoiMapGen.Utils
                 }
 
                 // Ищем границу (полигон дыры)
-                var polygon = new NativeList<int2>(16, Allocator.Temp);
-                for (var j = 0; j < badTriangles.Length; j++)
+                NativeList<int2> polygon = new NativeList<int2>(16, Allocator.Temp);
+                for (int j = 0; j < badTriangles.Length; j++)
                 {
-                    var tri = triangles[badTriangles[j]];
+                    TriangleIndices tri = triangles[badTriangles[j]];
                     AddEdgeIfUnique(ref polygon, tri.A, tri.B);
                     AddEdgeIfUnique(ref polygon, tri.B, tri.C);
                     AddEdgeIfUnique(ref polygon, tri.C, tri.A);
@@ -65,7 +65,7 @@ namespace VoronoiMapGen.Utils
                 CleanupBadTriangles(ref triangles);
 
                 // Зашиваем дыру
-                for (var k = 0; k < polygon.Length; k++)
+                for (int k = 0; k < polygon.Length; k++)
                     triangles.Add(new TriangleIndices { A = polygon[k].x, B = polygon[k].y, C = i });
 
                 badTriangles.Dispose();
@@ -83,9 +83,9 @@ namespace VoronoiMapGen.Utils
         private static void RemoveSuperStructures(ref NativeList<TriangleIndices> triangles, int n)
         {
             // Идем с конца, чтобы безопасно удалять
-            for (var i = triangles.Length - 1; i >= 0; i--)
+            for (int i = triangles.Length - 1; i >= 0; i--)
             {
-                var t = triangles[i];
+                TriangleIndices t = triangles[i];
                 // Если хоть одна вершина принадлежит супер-треугольнику
                 if (t.A >= n || t.B >= n || t.C >= n) triangles.RemoveAtSwapBack(i);
             }
@@ -93,7 +93,7 @@ namespace VoronoiMapGen.Utils
 
         private static void CleanupBadTriangles(ref NativeList<TriangleIndices> triangles)
         {
-            for (var i = triangles.Length - 1; i >= 0; i--)
+            for (int i = triangles.Length - 1; i >= 0; i--)
                 if (triangles[i].IsBad)
                     triangles.RemoveAtSwapBack(i);
         }
@@ -104,8 +104,8 @@ namespace VoronoiMapGen.Utils
             // В предыдущем коде использовался простой подход: add all edges -> remove duplicates.
         )
         {
-            var isDuplicate = false;
-            for (var i = 0; i < polygon.Length; i++)
+            bool isDuplicate = false;
+            for (int i = 0; i < polygon.Length; i++)
                 // Если ребро (a,b) или (b,a) уже есть, значит оно общее для двух удаляемых треугольников -> удаляем его.
                 if ((polygon[i].x == a && polygon[i].y == b) || (polygon[i].x == b && polygon[i].y == a))
                 {

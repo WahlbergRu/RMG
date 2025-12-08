@@ -11,7 +11,7 @@ namespace VoronoiMapGen.Utils
         public static Entity CreateMeshEntity(EntityManager em, Mesh mesh, Material material, float3 position,
             float4 color)
         {
-            var entity = em.CreateEntity();
+            Entity entity = em.CreateEntity();
 
             // Создаем RenderMeshUnmanaged
             UnityObjectRef<Mesh> meshRef = mesh;

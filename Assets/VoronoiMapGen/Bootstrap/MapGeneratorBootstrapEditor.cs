@@ -82,7 +82,7 @@ namespace VoronoiMapGen.Bootstrap
 
         public override void OnInspectorGUI()
         {
-            var bootstrap = (MapGeneratorBootstrap)target;
+            MapGeneratorBootstrap bootstrap = (MapGeneratorBootstrap)target;
             serializedObject.Update();
 
             headerStyle = new GUIStyle(EditorStyles.boldLabel)
@@ -216,7 +216,7 @@ namespace VoronoiMapGen.Bootstrap
             EditorGUILayout.EndVertical();
 
             GUILayout.Space(10);
-            var showColors = EditorPrefs.GetBool("MapGen_ShowColors", false);
+            bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", false);
             showColors = EditorGUILayout.Foldout(showColors, "Biome Palette Colors", true);
             if (showColors)
             {
@@ -265,14 +265,14 @@ namespace VoronoiMapGen.Bootstrap
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel(label);
 
-            var originalIndent = EditorGUI.indentLevel;
+            int originalIndent = EditorGUI.indentLevel;
             EditorGUI.indentLevel = 0;
 
-            for (var i = 0; i < listProp.arraySize; i++)
+            for (int i = 0; i < listProp.arraySize; i++)
             {
-                var element = listProp.GetArrayElementAtIndex(i);
-                var val = element.boolValue;
-                var newVal = EditorGUILayout.ToggleLeft($"L{i}", val, GUILayout.Width(45));
+                SerializedProperty element = listProp.GetArrayElementAtIndex(i);
+                bool val = element.boolValue;
+                bool newVal = EditorGUILayout.ToggleLeft($"L{i}", val, GUILayout.Width(45));
                 if (newVal != val) element.boolValue = newVal;
             }
 

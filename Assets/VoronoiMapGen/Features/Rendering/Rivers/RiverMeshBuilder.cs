@@ -18,7 +18,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
             NativeArray<TerrainVisualData> styles,
             List<Mesh> meshesToTrack) // Legacy GameObject Output
         {
-            var query = em.CreateEntityQuery(
+            EntityQuery query = em.CreateEntityQuery(
                 ComponentType.ReadOnly<VoronoiCell>(),
                 ComponentType.ReadOnly<HydrologyData>(),
                 ComponentType.ReadOnly<DetailLevelData>(),
@@ -27,73 +27,73 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
 
             if (query.IsEmpty) return;
 
-            using var entities = query.ToEntityArray(Allocator.Temp);
-            using var cells = query.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
-            using var hydro = query.ToComponentDataArray<HydrologyData>(Allocator.Temp);
-            using var biomes = query.ToComponentDataArray<CellBiome>(Allocator.Temp);
-            using var levels = query.ToComponentDataArray<DetailLevelData>(Allocator.Temp);
+            using NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp);
+            using NativeArray<VoronoiCell> cells = query.ToComponentDataArray<VoronoiCell>(Allocator.Temp);
+            using NativeArray<HydrologyData> hydro = query.ToComponentDataArray<HydrologyData>(Allocator.Temp);
+            using NativeArray<CellBiome> biomes = query.ToComponentDataArray<CellBiome>(Allocator.Temp);
+            using NativeArray<DetailLevelData> levels = query.ToComponentDataArray<DetailLevelData>(Allocator.Temp);
 
-            var siteMap = new NativeParallelHashMap<int, int>(cells.Length, Allocator.Temp);
-            for (var i = 0; i < cells.Length; i++)
+            NativeParallelHashMap<int, int> siteMap = new NativeParallelHashMap<int, int>(cells.Length, Allocator.Temp);
+            for (int i = 0; i < cells.Length; i++)
             {
-                var lvl = (int)levels[i].Level;
-                var uniqueKey = (lvl << 24) + cells[i].SiteIndex;
+                int lvl = (int)levels[i].Level;
+                int uniqueKey = (lvl << 24) + cells[i].SiteIndex;
                 siteMap.TryAdd(uniqueKey, i);
             }
 
             // === 1. Switch buffers to NativeList (Adapter Pattern) ===
             // This enables us to use the new Burst-optimized Geometry pipeline
-            var sVerts = new NativeList<float3>(256, Allocator.Temp);
-            var sTris = new NativeList<int>(1024, Allocator.Temp);
-            var sUVs = new NativeList<float2>(256, Allocator.Temp);
+            NativeList<float3> sVerts = new NativeList<float3>(256, Allocator.Temp);
+            NativeList<int> sTris = new NativeList<int>(1024, Allocator.Temp);
+            NativeList<float2> sUVs = new NativeList<float2>(256, Allocator.Temp);
 
             // Accumulators for Unity Mesh creation
-            var cVerts = new List<Vector3>(RiverBuilderUtils.CHUNK_LIMIT);
-            var cTris = new List<int>(RiverBuilderUtils.CHUNK_LIMIT * 3);
-            var cUVs = new List<Vector2>(RiverBuilderUtils.CHUNK_LIMIT);
+            List<Vector3> cVerts = new List<Vector3>(RiverBuilderUtils.CHUNK_LIMIT);
+            List<int> cTris = new List<int>(RiverBuilderUtils.CHUNK_LIMIT * 3);
+            List<Vector2> cUVs = new List<Vector2>(RiverBuilderUtils.CHUNK_LIMIT);
 
-            var renderMask = settings.RiverRenderMask;
+            int renderMask = settings.RiverRenderMask;
 
-            for (var i = 0; i < entities.Length; i++)
+            for (int i = 0; i < entities.Length; i++)
             {
-                var h = hydro[i];
+                HydrologyData h = hydro[i];
                 if (!h.IsRiver || h.FlowTargetIndex == -1) continue;
                 if (biomes[i].Type == BiomeType.Ocean) continue;
 
-                var currentLvl = (int)levels[i].Level;
+                int currentLvl = (int)levels[i].Level;
                 if ((renderMask & (1 << currentLvl)) == 0) continue;
 
-                var targetUniqueKey = (currentLvl << 24) + h.FlowTargetIndex;
-                if (!siteMap.TryGetValue(targetUniqueKey, out var nIdx)) continue;
+                int targetUniqueKey = (currentLvl << 24) + h.FlowTargetIndex;
+                if (!siteMap.TryGetValue(targetUniqueKey, out int nIdx)) continue;
 
-                var safeStyleIdx = RiverBuilderUtils.GetSafeStyleIndex((DetailLevel)currentLvl, styles.Length);
-                var myStyle = styles[safeStyleIdx];
+                int safeStyleIdx = RiverBuilderUtils.GetSafeStyleIndex((DetailLevel)currentLvl, styles.Length);
+                TerrainVisualData myStyle = styles[safeStyleIdx];
 
-                var gA = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[i], myStyle.HeightScale);
-                var gB = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[nIdx], myStyle.HeightScale);
+                float gA = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[i], myStyle.HeightScale);
+                float gB = RiverBuilderUtils.CalculateBaseTerrainHeightSafe(biomes[nIdx], myStyle.HeightScale);
 
                 if (biomes[i].Type == BiomeType.Ocean) gA = 0.2f;
                 if (biomes[nIdx].Type == BiomeType.Ocean) gB = 0.2f;
 
-                var yOffset = 0.2f;
-                var yA = gA + yOffset;
-                var yB = gB + yOffset;
+                float yOffset = 0.2f;
+                float yA = gA + yOffset;
+                float yB = gB + yOffset;
 
-                var start = new float3(cells[i].Centroid.x, yA, cells[i].Centroid.y);
-                var end = new float3(cells[nIdx].Centroid.x, yB, cells[nIdx].Centroid.y);
+                float3 start = new float3(cells[i].Centroid.x, yA, cells[i].Centroid.y);
+                float3 end = new float3(cells[nIdx].Centroid.x, yB, cells[nIdx].Centroid.y);
 
                 if (!RiverBuilderUtils.IsFinite(start) || !RiverBuilderUtils.IsFinite(end)) continue;
                 if (math.distancesq(start, end) < 0.1f) continue;
                 if (math.abs(yA - yB) > RiverBuilderUtils.MAX_HEIGHT_DIFF) continue;
 
-                var fluxA = math.max(0, h.Flux);
-                var fluxB = math.max(0, hydro[nIdx].Flux);
-                var hierarchyBonus = 1.0f + math.max(0, 3 - currentLvl) * 0.2f;
-                var configScale = myStyle.RiverWidthScale;
+                float fluxA = math.max(0, h.Flux);
+                float fluxB = math.max(0, hydro[nIdx].Flux);
+                float hierarchyBonus = 1.0f + math.max(0, 3 - currentLvl) * 0.2f;
+                float configScale = myStyle.RiverWidthScale;
                 
-                var widthScale = hierarchyBonus * configScale;
-                var wA = math.clamp(math.sqrt(fluxA) * widthScale, 2.5f, 150.0f);
-                var wB = math.clamp(math.sqrt(fluxB) * widthScale, 2.5f, 150.0f);
+                float widthScale = hierarchyBonus * configScale;
+                float wA = math.clamp(math.sqrt(fluxA) * widthScale, 2.5f, 150.0f);
+                float wB = math.clamp(math.sqrt(fluxB) * widthScale, 2.5f, 150.0f);
                 if (biomes[nIdx].Type == BiomeType.Ocean) wB *= 3.0f;
 
                 // === 2. GENERATE USING NATIVE LISTS ===
@@ -117,7 +117,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
                 if (cVerts.Count + sVerts.Length > RiverBuilderUtils.CHUNK_LIMIT)
                     RiverBatcher.FlushChunk(em, material, cVerts, cTris, cUVs, meshesToTrack);
 
-                var baseIndex = cVerts.Count;
+                int baseIndex = cVerts.Count;
                 
                 for(int v=0; v<sVerts.Length; v++) cVerts.Add(sVerts[v]); // float3 -> Vector3 implicit
                 for(int u=0; u<sUVs.Length; u++) cUVs.Add(sUVs[u]);       // float2 -> Vector2 implicit

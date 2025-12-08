@@ -10,13 +10,13 @@ namespace VoronoiMapGen.Utils
         public static Material Get(string shaderName, Color color, float smoothness = 0f)
         {
             // Ключ для кэша
-            var key = $"{shaderName}_{color}_{smoothness}";
+            string key = $"{shaderName}_{color}_{smoothness}";
 
-            if (_cache.TryGetValue(key, out var mat))
+            if (_cache.TryGetValue(key, out Material mat))
                 if (mat != null)
                     return mat;
 
-            var shader = Shader.Find(shaderName) ?? Shader.Find("Universal Render Pipeline/Lit");
+            Shader shader = Shader.Find(shaderName) ?? Shader.Find("Universal Render Pipeline/Lit");
             if (!shader) shader = Shader.Find("Standard");
 
             mat = new Material(shader);
@@ -31,7 +31,7 @@ namespace VoronoiMapGen.Utils
 
         public static void Clear()
         {
-            foreach (var mat in _cache.Values)
+            foreach (Material mat in _cache.Values)
                 if (mat != null)
                     Object.DestroyImmediate(mat);
             _cache.Clear();

@@ -19,15 +19,15 @@ namespace VoronoiMapGen.Utils
         private static void ClipAxis(ref NativeList<float2> poly, float2 n, float d)
         {
             if (poly.Length == 0) return;
-            var output = new NativeList<float2>(poly.Length + 4, Allocator.Temp);
+            NativeList<float2> output = new NativeList<float2>(poly.Length + 4, Allocator.Temp);
 
-            for (var i = 0; i < poly.Length; i++)
+            for (int i = 0; i < poly.Length; i++)
             {
-                var curr = poly[i];
-                var prev = poly[(i + poly.Length - 1) % poly.Length];
+                float2 curr = poly[i];
+                float2 prev = poly[(i + poly.Length - 1) % poly.Length];
 
-                var currIn = math.dot(curr, n) >= d;
-                var prevIn = math.dot(prev, n) >= d;
+                bool currIn = math.dot(curr, n) >= d;
+                bool prevIn = math.dot(prev, n) >= d;
 
                 if (currIn)
                 {
@@ -47,7 +47,7 @@ namespace VoronoiMapGen.Utils
 
         private static float2 Intersect(float2 a, float2 b, float2 n, float d)
         {
-            var t = (d - math.dot(a, n)) / math.dot(b - a, n);
+            float t = (d - math.dot(a, n)) / math.dot(b - a, n);
             return a + t * (b - a);
         }
     }

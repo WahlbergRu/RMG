@@ -20,10 +20,13 @@ namespace VoronoiMapGen.Features.Rendering.Components
         public float StrataJitter;
         public float TopNoiseAmplitude;
 
-        // --- НОВЫЕ ПАРАМЕТРЫ ДЛЯ РЕК ---
-        public float RiverWidthScale; // Множитель ширины
-        public float RiverMeanderAmplitude; // Насколько сильно извивается (амплитуда синусоиды/шума)
-        public float RiverMeanderFrequency; // Как часто извивается (частота)
-        public float RiverNoiseInfluence; // Влияние случайного шума (хаос)
+        // Настройки рек
+        public float RiverWidthScale; 
+        public float RiverMeanderAmplitude; 
+        public float RiverMeanderFrequency; 
+        public float RiverNoiseInfluence; 
+        
+        // --- НОВОЕ ПОЛЕ ---
+        public float TextureTiling; 
     }
 }

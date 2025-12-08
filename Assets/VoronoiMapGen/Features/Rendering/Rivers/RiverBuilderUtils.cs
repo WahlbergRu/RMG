@@ -37,7 +37,7 @@ namespace VoronoiMapGen.Features.Rendering.Rivers
         
         public static int GetSafeStyleIndex(DetailLevel lvl, int length)
         {
-            var idx = (int)lvl;
+            int idx = (int)lvl;
             if (idx < 0) return 0;
             if (idx >= length) return length - 1;
             return idx;

@@ -1,5 +1,4 @@
 ﻿using System.Runtime.CompilerServices;
-using Unity.Burst;
 using Unity.Collections;
 using Unity.Mathematics;
 using VoronoiMapGen.Features.MapGeneration.Components;
@@ -7,11 +6,12 @@ using VoronoiMapGen.Features.Rendering.Components;
 
 namespace VoronoiMapGen.Features.Rendering.Terrain
 {
-    [BurstCompile]
+    // УБРАЛ [BurstCompile] с класса и методов.
+    // Код будет скомпилирован Burst'ом, потому что его вызывает Burst Job.
     public static class TerrainGeometryBuilder
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void CalculateLayout(int vertexCount, TerrainVisualData style, bool isWater, out int totalVerts, out int totalIndices)
+        public static void CalculateLayout(int vertexCount, in TerrainVisualData style, bool isWater, out int totalVerts, out int totalIndices)
         {
             var n = vertexCount;
             var layers = style.Style == TerrainStyle.Stratified && !isWater ? style.StrataCount : 1;
@@ -20,13 +20,13 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             totalIndices = (n - 2) * 3 + layers * n * 6;
         }
 
-        // --- ИСПРАВЛЕНИЕ: NativeArray<float3> input (без .ReadOnly) для упрощения вызова ---
-        [BurstCompile]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void FillMesh(
+            // Используем NativeSlice - это более универсально для записи в части массива
             NativeArray<ProceduralVertex> outVerts,
             NativeArray<ProceduralIndex> outIndices,
-            NativeArray<float3> input, // <--- Убран .ReadOnly
-            GenerationContext ctx,
+            NativeArray<float3> input, 
+            in GenerationContext ctx, // передаем по ссылке (in) для скорости
             ref NativeList<float3> ringBufferA,
             ref NativeList<float3> ringBufferB
         )
@@ -41,7 +41,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             NativeArray<ProceduralVertex> vb,
             NativeArray<ProceduralIndex> ib,
             NativeArray<float3> input,
-            GenerationContext ctx,
+            in GenerationContext ctx,
             ref NativeList<float3> ring0,
             ref NativeList<float3> ring1)
         {
@@ -61,8 +61,8 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                     pos.y += noise.snoise(new float2(pos.x + ctx.CenterPos.x, pos.z + ctx.CenterPos.z) * 0.2f) * ctx.Style.TopNoiseAmplitude;
                 }
                 
-                // Деление UV на масштаб (fix 2 в вашем списке улучшений)
-                float uvScale = 0.05f; 
+                // Texture Tiling
+                float uvScale = ctx.Style.TextureTiling > 0.0001f ? ctx.Style.TextureTiling : 0.05f; 
                 vb[vPtr++] = new ProceduralVertex { Position = pos, Normal = math.up(), Color = ctx.Color, UV = new float2(pos.x, pos.z) * uvScale };
             }
 
@@ -79,7 +79,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             NativeArray<ProceduralVertex> vb,
             NativeArray<ProceduralIndex> ib,
             NativeArray<float3> input,
-            GenerationContext ctx,
+            in GenerationContext ctx,
             ref NativeList<float3> ringTop,
             ref NativeList<float3> ringBot)
         {
@@ -99,7 +99,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
                 {
                      pos.y += noise.snoise(new float2(pos.x + ctx.CenterPos.x, pos.z + ctx.CenterPos.z) * 0.2f) * ctx.Style.TopNoiseAmplitude;
                 }
-                float uvScale = 0.05f;
+                float uvScale = ctx.Style.TextureTiling > 0.0001f ? ctx.Style.TextureTiling : 0.05f; 
                 vb[vPtr++] = new ProceduralVertex { Position = pos, Normal = math.up(), Color = ctx.Color, UV = new float2(pos.x, pos.z) * uvScale };
             }
 

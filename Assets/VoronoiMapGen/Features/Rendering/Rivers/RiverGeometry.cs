@@ -22,14 +22,14 @@ namespace VoronoiMapGen.Features.Rendering
             ref NativeList<float2> uvs,
             int seed)
         {
-            var midPoint = (start + end) * 0.5f;
+            float3 midPoint = (start + end) * 0.5f;
             // Ensure cliffTop and cliffBot maintain their vertical difference
-            var cliffTop = new float3(midPoint.x, start.y, midPoint.z);
-            var cliffBot = new float3(midPoint.x, end.y, midPoint.z);
+            float3 cliffTop = new float3(midPoint.x, start.y, midPoint.z);
+            float3 cliffBot = new float3(midPoint.x, end.y, midPoint.z);
 
-            var widthMid = (wStart + wEnd) * 0.5f;
-            var diff = math.abs(start.y - end.y);
-            var isWaterfall = diff > WATERFALL_THRESHOLD;
+            float widthMid = (wStart + wEnd) * 0.5f;
+            float diff = math.abs(start.y - end.y);
+            bool isWaterfall = diff > WATERFALL_THRESHOLD;
 
             // Strip 1: Start -> Middle (Top)
             BuildPhysicsStrip(start, cliffTop, wStart, widthMid, start.y, start.y,
@@ -55,51 +55,51 @@ namespace VoronoiMapGen.Features.Rendering
             ref NativeList<float3> verts, ref NativeList<int> tris, ref NativeList<float2> uvs,
             int seed, float tGStart, float tGEnd)
         {
-            var dir = pB - pA;
-            var len = math.length(new float2(dir.x, dir.z));
+            float3 dir = pB - pA;
+            float len = math.length(new float2(dir.x, dir.z));
 
             if (len < 0.01f) return;
 
-            var fwd = math.normalize(dir);
+            float3 fwd = math.normalize(dir);
             // Replaced Vector3 logic with Mathematics
-            var right = new float3(-fwd.z, 0, fwd.x);
+            float3 right = new float3(-fwd.z, 0, fwd.x);
 
-            var meanderFreq = style.RiverMeanderFrequency;
-            var meanderAmp = style.RiverMeanderAmplitude;
-            var noiseInf = style.RiverNoiseInfluence;
+            float meanderFreq = style.RiverMeanderFrequency;
+            float meanderAmp = style.RiverMeanderAmplitude;
+            float noiseInf = style.RiverNoiseInfluence;
 
             // Use 'math' instead of 'Mathf'
-            var steps = math.max(2, (int)(len / 2.0f) + (int)(meanderAmp * 1.5f));
-            var baseIdx = verts.Length;
+            int steps = math.max(2, (int)(len / 2.0f) + (int)(meanderAmp * 1.5f));
+            int baseIdx = verts.Length;
 
-            var baerOffset = (wA + wB) * 0.5f * 0.1f;
+            float baerOffset = (wA + wB) * 0.5f * 0.1f;
 
-            for (var i = 0; i <= steps; i++)
+            for (int i = 0; i <= steps; i++)
             {
-                var tLoc = (float)i / steps;
-                var tTot = math.lerp(tGStart, tGEnd, tLoc);
+                float tLoc = (float)i / steps;
+                float tTot = math.lerp(tGStart, tGEnd, tLoc);
 
-                var p = math.lerp(pA, pB, tLoc);
-                var w = math.lerp(wA, wB, tLoc);
-                var h = math.lerp(hA, hB, tLoc);
+                float3 p = math.lerp(pA, pB, tLoc);
+                float w = math.lerp(wA, wB, tLoc);
+                float h = math.lerp(hA, hB, tLoc);
 
                 // --- Spline Logic ---
                 // Envelope
-                var env = math.pow(math.max(0, math.sin(tTot * math.PI)), 0.6f);
+                float env = math.pow(math.max(0, math.sin(tTot * math.PI)), 0.6f);
 
                 // Simplex Noise (Using Unity.Mathematics.noise)
-                var noisePos = new float2(p.x, p.z);
-                var nVal = noise.snoise(noisePos * meanderFreq + new float2(seed * 0.15f));
-                var detailNoise = noise.snoise(noisePos * (meanderFreq * 3.5f) + new float2(seed * 0.9f)) * 0.3f;
+                float2 noisePos = new float2(p.x, p.z);
+                float nVal = noise.snoise(noisePos * meanderFreq + new float2(seed * 0.15f));
+                float detailNoise = noise.snoise(noisePos * (meanderFreq * 3.5f) + new float2(seed * 0.9f)) * 0.3f;
 
-                var offsetValue = (nVal + detailNoise) * noiseInf + baerOffset;
-                var totalOffset = right * (offsetValue * meanderAmp * env);
+                float offsetValue = (nVal + detailNoise) * noiseInf + baerOffset;
+                float3 totalOffset = right * (offsetValue * meanderAmp * env);
 
-                var center = p + totalOffset;
+                float3 center = p + totalOffset;
                 center.y = h;
 
                 // Vertical noise gluing
-                var tNAmp = math.lerp(tNoiseA, tNoiseB, tLoc);
+                float tNAmp = math.lerp(tNoiseA, tNoiseB, tLoc);
                 if (tNAmp > 0)
                 {
                      center.y += noise.snoise(new float2(center.x, center.z) * 0.2f) * tNAmp;
@@ -108,7 +108,7 @@ namespace VoronoiMapGen.Features.Rendering
                 verts.Add(center - right * w * 0.5f);
                 verts.Add(center + right * w * 0.5f);
 
-                var vCoords = tTot * (len * 0.1f);
+                float vCoords = tTot * (len * 0.1f);
                 uvs.Add(new float2(0, vCoords));
                 uvs.Add(new float2(1, vCoords));
 
@@ -131,13 +131,13 @@ namespace VoronoiMapGen.Features.Rendering
         {
             if (verts.Length < 2) return;
             
-            var iTL = verts.Length - 2;
-            var iTR = verts.Length - 1;
+            int iTL = verts.Length - 2;
+            int iTR = verts.Length - 1;
             
-            var pTL = verts[iTL];
-            var pTR = verts[iTR];
-            var pBL = new float3(pTL.x, bot.y, pTL.z);
-            var pBR = new float3(pTR.x, bot.y, pTR.z);
+            float3 pTL = verts[iTL];
+            float3 pTR = verts[iTR];
+            float3 pBL = new float3(pTL.x, bot.y, pTL.z);
+            float3 pBR = new float3(pTR.x, bot.y, pTR.z);
 
             verts.Add(pBL);
             verts.Add(pBR);
@@ -145,8 +145,8 @@ namespace VoronoiMapGen.Features.Rendering
             uvs.Add(new float2(0, 0));
             uvs.Add(new float2(1, 0));
             
-            var iBL = verts.Length - 2;
-            var iBR = verts.Length - 1;
+            int iBL = verts.Length - 2;
+            int iBR = verts.Length - 1;
             
             // Waterfall Face Triangles
             tris.Add(iTL);

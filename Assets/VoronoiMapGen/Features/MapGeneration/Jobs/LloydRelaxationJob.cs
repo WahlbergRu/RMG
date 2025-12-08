@@ -18,10 +18,10 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
 
         public void Execute()
         {
-            for (var i = 0; i < Cells.Length; i++)
+            for (int i = 0; i < Cells.Length; i++)
             {
-                var cell = Cells[i];
-                var siteIndex = cell.SiteIndex;
+                VoronoiCell cell = Cells[i];
+                int siteIndex = cell.SiteIndex;
 
                 // Проверяем метаданные:
                 // Если Value < -0.5f, значит это ПРИЗРАК (Ghost).
@@ -35,7 +35,7 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                 // Для релаксации этого достаточно.
 
                 // Дополнительная защита: не даем сайту улететь за карту
-                var newPos = cell.Centroid;
+                float2 newPos = cell.Centroid;
                 newPos = math.clamp(newPos, new float2(0), MapSize);
 
                 // Применяем сглаживание (Lerp), чтобы сетка не схлопнулась слишком быстро (опционально)

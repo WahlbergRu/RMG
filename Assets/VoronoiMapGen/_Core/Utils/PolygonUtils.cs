@@ -21,26 +21,26 @@ namespace VoronoiMapGen.Utils
 
             // 1. Квантуем родителя (клиппер), чтобы убрать микро-шум на его границах
             // Используем копию, чтобы не ломать оригинал
-            var cleanClipper = new NativeList<float2>(clipper.Length, Allocator.Temp);
-            for (var i = 0; i < clipper.Length; i++)
+            NativeList<float2> cleanClipper = new NativeList<float2>(clipper.Length, Allocator.Temp);
+            for (int i = 0; i < clipper.Length; i++)
                 cleanClipper.Add(Quantize(clipper[i]));
 
             EnsureCCW(ref cleanClipper);
 
-            var len = cleanClipper.Length;
-            for (var i = 0; i < len; i++)
+            int len = cleanClipper.Length;
+            for (int i = 0; i < len; i++)
             {
                 if (subject.Length < 3) break;
 
-                var a = cleanClipper[i];
-                var b = cleanClipper[(i + 1) % len];
+                float2 a = cleanClipper[i];
+                float2 b = cleanClipper[(i + 1) % len];
 
                 if (math.distancesq(a, b) < 1e-6f) continue;
 
                 // Вектор и нормаль (CCW)
-                var edge = b - a;
-                var normal = math.normalize(new float2(-edge.y, edge.x));
-                var dist = math.dot(normal, a);
+                float2 edge = b - a;
+                float2 normal = math.normalize(new float2(-edge.y, edge.x));
+                float dist = math.dot(normal, a);
 
                 ClipByPlane(ref subject, normal, dist);
             }
@@ -51,8 +51,8 @@ namespace VoronoiMapGen.Utils
         public static void ClipToBounds(ref NativeList<float2> polygon, float2 mapSize)
         {
             // Также квантуем границы мира
-            var min = Quantize(new float2(0, 0));
-            var max = Quantize(mapSize);
+            float2 min = Quantize(new float2(0, 0));
+            float2 max = Quantize(mapSize);
 
             ClipByPlane(ref polygon, new float2(1, 0), min.x);
             ClipByPlane(ref polygon, new float2(-1, 0), -max.x);
@@ -64,18 +64,18 @@ namespace VoronoiMapGen.Utils
 
         private static void ClipByPlane(ref NativeList<float2> poly, float2 n, float d)
         {
-            var output = new NativeList<float2>(poly.Length + 4, Allocator.Temp);
+            NativeList<float2> output = new NativeList<float2>(poly.Length + 4, Allocator.Temp);
 
             // Квантуем входной полигон перед обработкой, чтобы все точки "сели" на сетку
-            for (var i = 0; i < poly.Length; i++) poly[i] = Quantize(poly[i]);
+            for (int i = 0; i < poly.Length; i++) poly[i] = Quantize(poly[i]);
 
-            for (var i = 0; i < poly.Length; i++)
+            for (int i = 0; i < poly.Length; i++)
             {
-                var curr = poly[i];
-                var prev = poly[(i + poly.Length - 1) % poly.Length];
+                float2 curr = poly[i];
+                float2 prev = poly[(i + poly.Length - 1) % poly.Length];
 
-                var currIn = math.dot(n, curr) >= d - Epsilon;
-                var prevIn = math.dot(n, prev) >= d - Epsilon;
+                bool currIn = math.dot(n, curr) >= d - Epsilon;
+                bool prevIn = math.dot(n, prev) >= d - Epsilon;
 
                 if (currIn)
                 {
@@ -92,9 +92,9 @@ namespace VoronoiMapGen.Utils
             poly.Clear();
             if (output.Length >= 3)
             {
-                for (var k = 0; k < output.Length; k++)
+                for (int k = 0; k < output.Length; k++)
                 {
-                    var p = output[k];
+                    float2 p = output[k];
                     // Фильтр дубликатов (после квантования это очень надежно)
                     if (poly.Length > 0 && math.distancesq(p, poly[poly.Length - 1]) < 1e-8f) continue;
                     if (!IsNaN(p)) poly.Add(p);
@@ -121,17 +121,17 @@ namespace VoronoiMapGen.Utils
         private static void EnsureCCW(ref NativeList<float2> poly)
         {
             float area = 0;
-            for (var i = 0; i < poly.Length; i++)
+            for (int i = 0; i < poly.Length; i++)
             {
-                var curr = poly[i];
-                var next = poly[(i + 1) % poly.Length];
+                float2 curr = poly[i];
+                float2 next = poly[(i + 1) % poly.Length];
                 area += (next.x - curr.x) * (next.y + curr.y);
             }
 
             if (area > 0)
-                for (var i = 0; i < poly.Length / 2; i++)
+                for (int i = 0; i < poly.Length / 2; i++)
                 {
-                    var tmp = poly[i];
+                    float2 tmp = poly[i];
                     poly[i] = poly[poly.Length - 1 - i];
                     poly[poly.Length - 1 - i] = tmp;
                 }
@@ -139,7 +139,7 @@ namespace VoronoiMapGen.Utils
 
         private static float2 Intersect(float2 a, float2 b, float2 n, float d)
         {
-            var t = (d - math.dot(n, a)) / math.dot(n, b - a);
+            float t = (d - math.dot(n, a)) / math.dot(n, b - a);
             // double precision math for intersection stability
             return math.lerp(a, b, t);
         }
@@ -148,13 +148,13 @@ namespace VoronoiMapGen.Utils
         public static void ApplyInset(ref NativeList<float2> poly, float2 center, float amount)
         {
             if (math.abs(amount) < 0.001f || poly.Length < 3) return;
-            for (var i = 0; i < poly.Length; i++)
+            for (int i = 0; i < poly.Length; i++)
             {
-                var dir = poly[i] - center;
-                var len = math.length(dir);
+                float2 dir = poly[i] - center;
+                float len = math.length(dir);
                 if (len > 0.001f)
                 {
-                    var move = amount > 0 ? math.min(len - 0.01f, amount) : amount;
+                    float move = amount > 0 ? math.min(len - 0.01f, amount) : amount;
                     // Здесь квантование не обязательно, это чисто визуал
                     poly[i] = center + dir / len * (len - move);
                 }
@@ -164,15 +164,15 @@ namespace VoronoiMapGen.Utils
         public static void ApplySmoothing(ref NativeList<float2> poly, int iterations)
         {
             if (iterations <= 0 || poly.Length < 3) return;
-            var temp = new NativeList<float2>(poly.Length * 2, Allocator.Temp);
-            for (var iter = 0; iter < iterations; iter++)
+            NativeList<float2> temp = new NativeList<float2>(poly.Length * 2, Allocator.Temp);
+            for (int iter = 0; iter < iterations; iter++)
             {
                 temp.Clear();
-                var count = poly.Length;
-                for (var i = 0; i < count; i++)
+                int count = poly.Length;
+                for (int i = 0; i < count; i++)
                 {
-                    var p0 = poly[i];
-                    var p1 = poly[(i + 1) % count];
+                    float2 p0 = poly[i];
+                    float2 p1 = poly[(i + 1) % count];
                     temp.Add(math.lerp(p0, p1, 0.25f));
                     temp.Add(math.lerp(p0, p1, 0.75f));
                 }

@@ -24,8 +24,8 @@ namespace VoronoiMapGen.Features.Rendering.Utils
 
         public static Material EnsureMaterial(string shaderName = "Universal Render Pipeline/Lit")
         {
-            var shader = Shader.Find(shaderName) ?? Shader.Find("Standard");
-            var mat = new Material(shader);
+            Shader shader = Shader.Find(shaderName) ?? Shader.Find("Standard");
+            Material mat = new Material(shader);
             mat.enableInstancing = true;
             mat.SetFloat("_Smoothness", 0.2f); // Матовый
             return mat;

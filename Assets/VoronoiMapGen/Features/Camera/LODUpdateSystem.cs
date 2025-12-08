@@ -18,7 +18,7 @@ namespace VoronoiMapGen.Features.Camera
         protected override void OnUpdate()
         {
             // 1. Получаем доступ к настройкам
-            if (!SystemAPI.TryGetSingletonRW<MapSettings>(out var mapSettingsRw)) return;
+            if (!SystemAPI.TryGetSingletonRW<MapSettings>(out RefRW<MapSettings> mapSettingsRw)) return;
             
             // Если Авто-ЛOД выключен вручную - не вмешиваемся
             if (!mapSettingsRw.ValueRO.UseAutoLOD) 
@@ -27,11 +27,11 @@ namespace VoronoiMapGen.Features.Camera
                 return;
             }
 
-            if (!SystemAPI.TryGetSingleton<CameraSettingsData>(out var camSettings)) return;
+            if (!SystemAPI.TryGetSingleton<CameraSettingsData>(out CameraSettingsData camSettings)) return;
             
-            var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
+            Entity settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
             if (!EntityManager.HasBuffer<LevelSettings>(settingsEntity)) return;
-            var levels = EntityManager.GetBuffer<LevelSettings>(settingsEntity);
+            DynamicBuffer<LevelSettings> levels = EntityManager.GetBuffer<LevelSettings>(settingsEntity);
             if (levels.Length == 0) return;
 
             // 2. Получаем текущий зум (дистанция до земли)

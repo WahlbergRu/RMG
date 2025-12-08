@@ -16,23 +16,23 @@ namespace VoronoiMapGen.Features.Utils
         public static (NativeArray<float2> sites, NativeArray<VoronoiSite> meta) FilterValidSites(
             NativeArray<float2> rawSites, NativeArray<VoronoiSite> rawMeta, Allocator allocator)
         {
-            var validCount = 0;
-            for (var i = 0; i < rawSites.Length; i++)
+            int validCount = 0;
+            for (int i = 0; i < rawSites.Length; i++)
                 if (rawMeta[i].Value > -0.5f)
                     validCount++;
 
-            var sites = new NativeArray<float2>(validCount, allocator);
-            var meta = new NativeArray<VoronoiSite>(validCount, allocator);
+            NativeArray<float2> sites = new NativeArray<float2>(validCount, allocator);
+            NativeArray<VoronoiSite> meta = new NativeArray<VoronoiSite>(validCount, allocator);
 
-            var idx = 0;
-            for (var i = 0; i < rawSites.Length; i++)
+            int idx = 0;
+            for (int i = 0; i < rawSites.Length; i++)
                 if (rawMeta[i].Value > -0.5f)
                 {
                     sites[idx] = rawSites[i];
                     meta[idx] = rawMeta[i];
 
                     // Обновляем индекс внутри структуры
-                    var m = meta[idx];
+                    VoronoiSite m = meta[idx];
                     m.Index = idx;
                     meta[idx] = m;
 
@@ -46,10 +46,10 @@ namespace VoronoiMapGen.Features.Utils
         public static NativeList<VoronoiEdge> ExtractEdgesFromDelaunay(
             NativeList<TriangleIndices> triangles, Allocator allocator)
         {
-            var edges = new NativeList<VoronoiEdge>(triangles.Length * 3, allocator);
-            for (var i = 0; i < triangles.Length; i++)
+            NativeList<VoronoiEdge> edges = new NativeList<VoronoiEdge>(triangles.Length * 3, allocator);
+            for (int i = 0; i < triangles.Length; i++)
             {
-                var t = triangles[i];
+                TriangleIndices t = triangles[i];
                 edges.Add(new VoronoiEdge { SiteA = t.A, SiteB = t.B });
                 edges.Add(new VoronoiEdge { SiteA = t.B, SiteB = t.C });
                 edges.Add(new VoronoiEdge { SiteA = t.C, SiteB = t.A });
@@ -66,23 +66,23 @@ namespace VoronoiMapGen.Features.Utils
             int level)
         {
             float totalDist = 0;
-            var sampleCount = 0;
-            var step = math.max(1, triangles.Length / 1000);
+            int sampleCount = 0;
+            int step = math.max(1, triangles.Length / 1000);
 
-            for (var i = 0; i < triangles.Length; i += step)
+            for (int i = 0; i < triangles.Length; i += step)
             {
-                var t = triangles[i];
+                TriangleIndices t = triangles[i];
                 // Игнорируем Океан! Считаем статистику только по суше
                 if (tectonics[t.A].IsOcean || tectonics[t.B].IsOcean || tectonics[t.C].IsOcean)
                     continue;
 
-                var d = math.distance(sites[t.A], sites[t.B]);
+                float d = math.distance(sites[t.A], sites[t.B]);
                 totalDist += d;
                 sampleCount++;
             }
 
-            var realAvgDist = sampleCount > 0 ? totalDist / sampleCount : 50f;
-            var multiplier = level == 0 ? 3.0f : 1.8f; // Уменьшил множитель для строгости
+            float realAvgDist = sampleCount > 0 ? totalDist / sampleCount : 50f;
+            float multiplier = level == 0 ? 3.0f : 1.8f; // Уменьшил множитель для строгости
 
             // Debug.Log($"Adaptive Limit L{level}: Avg={realAvgDist} Limit={realAvgDist*multiplier}");
             return realAvgDist * multiplier * (realAvgDist * multiplier);
@@ -100,10 +100,10 @@ namespace VoronoiMapGen.Features.Utils
             ref NativeList<VoronoiEdge> outEdges)
         {
             // 4.1. Собираем ячейки и их периметр
-            var vertOffset = 0;
-            for (var i = 0; i < sites.Length; i++)
+            int vertOffset = 0;
+            for (int i = 0; i < sites.Length; i++)
             {
-                var vCount = cellCounts[i];
+                int vCount = cellCounts[i];
 
                 outCells.Add(new VoronoiCell
                 {
@@ -115,7 +115,7 @@ namespace VoronoiMapGen.Features.Utils
                 });
 
                 // Периметр полигона (визуальные ребра)
-                for (var k = 0; k < vCount; k++)
+                for (int k = 0; k < vCount; k++)
                     outEdges.Add(new VoronoiEdge
                     {
                         SiteA = i, SiteB = -1,
@@ -127,9 +127,9 @@ namespace VoronoiMapGen.Features.Utils
             }
 
             // 4.2. Добавляем логические связи (для дорог)
-            for (var i = 0; i < triangles.Length; i++)
+            for (int i = 0; i < triangles.Length; i++)
             {
-                var t = triangles[i];
+                TriangleIndices t = triangles[i];
                 outEdges.Add(new VoronoiEdge { SiteA = t.A, SiteB = t.B, Level = level });
                 outEdges.Add(new VoronoiEdge { SiteA = t.B, SiteB = t.C, Level = level });
                 outEdges.Add(new VoronoiEdge { SiteA = t.C, SiteB = t.A, Level = level });

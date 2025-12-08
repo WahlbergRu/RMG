@@ -32,19 +32,19 @@ namespace VoronoiMapGen.Features.MapGeneration
                 else totalCount = pCells.Length * currentLevelSettings.MaxSiteCount;
             }
 
-            var sites = new NativeArray<float2>(totalCount, Allocator.Persistent);
-            var meta = new NativeArray<VoronoiSite>(totalCount, Allocator.Persistent);
+            NativeArray<float2> sites = new NativeArray<float2>(totalCount, Allocator.Persistent);
+            NativeArray<VoronoiSite> meta = new NativeArray<VoronoiSite>(totalCount, Allocator.Persistent);
 
             // Инициализация -1
-            var initJob = new InitializeArraysJob { Sites = sites, Meta = meta };
+            InitializeArraysJob initJob = new InitializeArraysJob { Sites = sites, Meta = meta };
             initJob.Schedule(totalCount, 64).Complete();
 
             // Создаем безопасные алиасы для джобы (Unity Jobs требуют валидные массивы)
-            var safeCells = CreateSafeAlias(pCells, out var disposeCells);
-            var safeMeta = CreateSafeAlias(pMeta, out var disposeMeta);
-            var safeHydro = CreateSafeAlias(pHydro, out var disposeHydro);
-            var safeTect = CreateSafeAlias(pTect, out var disposeTect);
-            var safeClim = CreateSafeAlias(pClim, out var disposeClim);
+            NativeArray<VoronoiCell> safeCells = CreateSafeAlias(pCells, out bool disposeCells);
+            NativeArray<VoronoiSite> safeMeta = CreateSafeAlias(pMeta, out bool disposeMeta);
+            NativeArray<HydrologyData> safeHydro = CreateSafeAlias(pHydro, out bool disposeHydro);
+            NativeArray<TectonicPlateData> safeTect = CreateSafeAlias(pTect, out bool disposeTect);
+            NativeArray<ClimateData> safeClim = CreateSafeAlias(pClim, out bool disposeClim);
 
             try
             {
@@ -123,21 +123,21 @@ namespace VoronoiMapGen.Features.MapGeneration
 
         public void Execute()
         {
-            var rng = new Random((uint)Seed);
-            var index = 0;
-            var localPoints = new NativeList<float2>(64, Allocator.Temp);
+            Random rng = new Random((uint)Seed);
+            int index = 0;
+            NativeList<float2> localPoints = new NativeList<float2>(64, Allocator.Temp);
 
             // --- L0: GLOBAL ---
             if (Level == 0)
             {
-                var count = Settings.GlobalSiteCount;
+                int count = Settings.GlobalSiteCount;
                 localPoints.Clear();
 
-                for (var i = 0; i < count; i++)
+                for (int i = 0; i < count; i++)
                 {
                     if (index >= Sites.Length) break;
                     // Для глобального уровня ищем по всей карте (0,0) -> MapSize
-                    var pos = GetBestCandidate(ref rng, localPoints, float2.zero, MapSize, 10, true);
+                    float2 pos = GetBestCandidate(ref rng, localPoints, float2.zero, MapSize, 10, true);
                     localPoints.Add(pos);
                     AddSite(index++, pos, -1, 0.5f);
                 }
@@ -145,28 +145,28 @@ namespace VoronoiMapGen.Features.MapGeneration
             // --- L1+: CHILDREN ---
             else
             {
-                var totalArea = MapSize.x * MapSize.y;
-                var parentCount = math.max(1, ParentCells.Length);
-                var avgParentRadius = math.sqrt(totalArea / parentCount / math.PI);
-                var spawnRadius = avgParentRadius * Settings.ScaleFactor;
+                float totalArea = MapSize.x * MapSize.y;
+                int parentCount = math.max(1, ParentCells.Length);
+                float avgParentRadius = math.sqrt(totalArea / parentCount / math.PI);
+                float spawnRadius = avgParentRadius * Settings.ScaleFactor;
 
-                for (var p = 0; p < ParentCells.Length; p++)
+                for (int p = 0; p < ParentCells.Length; p++)
                 {
                     if (index >= Sites.Length) break;
 
-                    var pCell = ParentCells[p];
+                    VoronoiCell pCell = ParentCells[p];
                     if (pCell.SiteIndex >= ParentMeta.Length) continue;
-                    var pMeta = ParentMeta[pCell.SiteIndex];
+                    VoronoiSite pMeta = ParentMeta[pCell.SiteIndex];
                     // Пропускаем "призраков"
                     if (pMeta.Value < -0.5f) continue;
 
                     // Расчет пригодности (Suitability) для спавна детей
-                    var suitability = 0.5f;
+                    float suitability = 0.5f;
                     if (ParentHydrology.Length > pCell.SiteIndex)
                     {
-                        var hydro = ParentHydrology[pCell.SiteIndex];
-                        var tect = ParentTectonics[pCell.SiteIndex];
-                        var clim = ParentClimate[pCell.SiteIndex];
+                        HydrologyData hydro = ParentHydrology[pCell.SiteIndex];
+                        TectonicPlateData tect = ParentTectonics[pCell.SiteIndex];
+                        ClimateData clim = ParentClimate[pCell.SiteIndex];
 
                         if (hydro.IsOcean || tect.IsOcean)
                         {
@@ -176,25 +176,25 @@ namespace VoronoiMapGen.Features.MapGeneration
                         {
                             if (hydro.IsRiver) suitability += 0.3f;
                             if (hydro.IsLake) suitability += 0.2f;
-                            var tempComfort = 1.0f - math.abs(clim.Temperature - 0.5f) * 2;
+                            float tempComfort = 1.0f - math.abs(clim.Temperature - 0.5f) * 2;
                             suitability += tempComfort * 0.2f;
                         }
                     }
 
                     suitability = math.clamp(suitability, 0.0f, 1.0f);
 
-                    var targetCount = (int)math.lerp(Settings.MinSiteCount, Settings.MaxSiteCount, suitability);
+                    int targetCount = (int)math.lerp(Settings.MinSiteCount, Settings.MaxSiteCount, suitability);
                     // Минимум 1 ребенок, если не океан
                     if (targetCount == 0 && Settings.MinSiteCount > 0) targetCount = 1;
                     if (suitability < 0.01f && Settings.MinSiteCount == 0) targetCount = 0;
 
                     localPoints.Clear();
-                    var center = pCell.Centroid;
+                    float2 center = pCell.Centroid;
 
-                    for (var c = 0; c < targetCount; c++)
+                    for (int c = 0; c < targetCount; c++)
                     {
                         if (index >= Sites.Length) break;
-                        var bestPos = GetBestCandidate(ref rng, localPoints, center, MapSize, 8, false, spawnRadius);
+                        float2 bestPos = GetBestCandidate(ref rng, localPoints, center, MapSize, 8, false, spawnRadius);
                         localPoints.Add(bestPos);
                         AddSite(index++, bestPos, pCell.SiteIndex, suitability);
                     }
@@ -207,19 +207,19 @@ namespace VoronoiMapGen.Features.MapGeneration
         private float2 GetBestCandidate(ref Random rng, NativeList<float2> existingPoints, float2 center,
             float2 mapSize, int attempts, bool globalMode, float radius = 0)
         {
-            var bestCandidate = float2.zero;
-            var maxDist = -1.0f;
+            float2 bestCandidate = float2.zero;
+            float maxDist = -1.0f;
 
             if (existingPoints.Length == 0) return GeneratePoint(ref rng, center, mapSize, globalMode, radius);
 
-            for (var k = 0; k < attempts; k++)
+            for (int k = 0; k < attempts; k++)
             {
-                var candidate = GeneratePoint(ref rng, center, mapSize, globalMode, radius);
+                float2 candidate = GeneratePoint(ref rng, center, mapSize, globalMode, radius);
 
-                var distToClosest = float.MaxValue;
-                for (var i = 0; i < existingPoints.Length; i++)
+                float distToClosest = float.MaxValue;
+                for (int i = 0; i < existingPoints.Length; i++)
                 {
-                    var d = math.distancesq(candidate, existingPoints[i]);
+                    float d = math.distancesq(candidate, existingPoints[i]);
                     if (d < distToClosest) distToClosest = d;
                 }
 
@@ -237,8 +237,8 @@ namespace VoronoiMapGen.Features.MapGeneration
         {
             if (global) return rng.NextFloat2(new float2(10), mapSize - new float2(10));
 
-            var dir = rng.NextFloat2Direction();
-            var dist = math.sqrt(rng.NextFloat()) * radius;
+            float2 dir = rng.NextFloat2Direction();
+            float dist = math.sqrt(rng.NextFloat()) * radius;
             return math.clamp(center + dir * dist, new float2(1), mapSize - new float2(1));
         }
 

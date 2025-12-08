@@ -6,7 +6,7 @@ using Unity.Rendering;
 using UnityEngine;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Features.MapGeneration.Components;
-using VoronoiMapGen.Features.Rendering.Components; // Для новых компонентов рендера
+using VoronoiMapGen.Features.Rendering.Components;
 using VoronoiMapGen.Features.Rendering.Rivers;
 using VoronoiMapGen.Features.Rendering.Terrain;
 
@@ -21,23 +21,20 @@ namespace VoronoiMapGen.Bootstrap
         public float BottomDepth = 30.0f;
         [Range(0f, 2f)] public float TopSurfaceNoise = 0.2f;
 
-        [Header("Stratified Settings")] [Range(1, 10)]
-        public int RockLayers = 3;
-
+        [Header("Stratified Settings")] 
+        [Range(1, 10)] public int RockLayers = 3;
         [Range(0f, 2f)] public float LayerInset = 0.3f;
 
         [Header("River Visuals")] 
-        [Tooltip("Множитель ширины реки")] [Range(0.1f, 5f)]
-        public float RiverWidthMultiplier = 1.0f;
+        [Tooltip("Множитель ширины реки")] [Range(0.1f, 5f)] public float RiverWidthMultiplier = 1.0f;
+        [Tooltip("Амплитуда изгибов (змейка)")] [Range(0f, 20f)] public float MeanderAmp = 2.0f;
+        [Tooltip("Частота изгибов")] [Range(0.001f, 0.5f)] public float MeanderFreq = 0.02f;
+        [Tooltip("Влияние шума")] [Range(0f, 5f)] public float NoiseInfluence = 1.0f;
 
-        [Tooltip("Амплитуда изгибов (змейка)")] [Range(0f, 20f)]
-        public float MeanderAmp = 2.0f;
-
-        [Tooltip("Частота изгибов")] [Range(0.001f, 0.5f)]
-        public float MeanderFreq = 0.02f;
-
-        [Tooltip("Влияние шума")] [Range(0f, 5f)]
-        public float NoiseInfluence = 1.0f;
+        // --- НОВАЯ НАСТРОЙКА ---
+        [Header("Texturing")]
+        [Tooltip("Масштаб UV (меньше = крупнее текстура). 0.05 по умолчанию")]
+        public float TextureScale = 0.05f; 
     }
 
     public class MapGeneratorBootstrap : MonoBehaviour
@@ -124,22 +121,36 @@ namespace VoronoiMapGen.Bootstrap
                 var s = VisualConfigs[i];
                 visBuf.Add(new TerrainVisualData
                 {
-                    Style = s.Style, HeightScale = s.HeightScale, BottomDepth = s.BottomDepth,
-                    TopNoiseAmplitude = s.TopSurfaceNoise, StrataCount = s.RockLayers, StrataInset = s.LayerInset,
+                    Style = s.Style,
+                    HeightScale = s.HeightScale,
+                    BottomDepth = s.BottomDepth,
+                    TopNoiseAmplitude = s.TopSurfaceNoise,
+                    StrataCount = s.RockLayers,
+                    StrataInset = s.LayerInset,
                     StrataJitter = 0.1f,
                     RiverWidthScale = s.RiverWidthMultiplier,
                     RiverMeanderAmplitude = s.MeanderAmp,
                     RiverMeanderFrequency = s.MeanderFreq,
-                    RiverNoiseInfluence = s.NoiseInfluence
+                    RiverNoiseInfluence = s.NoiseInfluence,
+                    
+                    // --- Запись значения в ECS компонент ---
+                    TextureTiling = s.TextureScale > 0.0001f ? s.TextureScale : 0.05f
                 });
             }
         }
 
         private void Update()
         {
-            var world = World.DefaultGameObjectInjectionWorld;
-            if (world == null) return;
-            UpdateSettingsToECS(world.EntityManager);
+            // ОПТИМИЗАЦИЯ: НЕ ВЫЗЫВАЕМ В UPDATE КАЖДЫЙ КАДР ДЛЯ ПРОДАКШЕНА
+#if UNITY_EDITOR
+            // Разрешаем обновление только в режиме редактора для удобства настройки
+            // Но лучше добавить проверку на изменения
+            if (!Application.isPlaying) 
+            {
+                 var world = World.DefaultGameObjectInjectionWorld;
+                 if (world != null) UpdateSettingsToECS(world.EntityManager);
+            }
+#endif
         }
 
         private void OnValidate()
@@ -164,38 +175,24 @@ namespace VoronoiMapGen.Bootstrap
             em.CompleteAllTrackedJobs();
             UpdateSettingsToECS(em);
 
-            // 1. Удаляем реки
+            // Очистка рек
             var chunkRiverQuery = em.CreateEntityQuery(typeof(RiverChunkTag));
             if (!chunkRiverQuery.IsEmpty) em.DestroyEntity(chunkRiverQuery);
 
             var oldRiverQuery = em.CreateEntityQuery(typeof(RiverSegmentOwner));
             if (!oldRiverQuery.IsEmpty) em.DestroyEntity(oldRiverQuery);
 
-            // 2. Очищаем компоненты рендеринга с ячеек
+            // Очистка чанков и старых данных ячеек
             var cellQuery = em.CreateEntityQuery(typeof(VoronoiCell), typeof(VoronoiCellMeshTag));
             if (!cellQuery.IsEmpty)
             {
-                // Стандартные компоненты
                 em.RemoveComponent<VoronoiCellMeshTag>(cellQuery);
-                em.RemoveComponent<MaterialMeshInfo>(cellQuery);
-                em.RemoveComponent<RenderMeshUnmanaged>(cellQuery);
-                em.RemoveComponent<RenderMeshArray>(cellQuery);
-                em.RemoveComponent<RenderBounds>(cellQuery);
-                em.RemoveComponent<WorldRenderBounds>(cellQuery);
-                em.RemoveComponent<URPMaterialPropertyBaseColor>(cellQuery);
-
-                // Новые процедурные компоненты
-                em.RemoveComponent<ProceduralMeshRequest>(cellQuery);
-                em.RemoveComponent<ProceduralVertex>(cellQuery);
-                em.RemoveComponent<ProceduralIndex>(cellQuery);
-                em.RemoveComponent<MeshDirtyTag>(cellQuery);
-                
-                // ProceduralMeshReference должен удаляться аккуратно системой Unified, 
-                // но если мы сносим все, лучше пометить это, иначе могут остаться "висящие" меши.
-                // В данной архитектуре, удаление Reference не освобождает Unity Mesh мгновенно без системы.
-                // UnifiedProceduralRenderSystem имеет логику очистки для сущностей БЕЗ Request но С Reference.
-                // Мы удалили Request выше, так что Reference удалится сам в OnUpdate системы.
+                em.RemoveComponent<ProceduralMeshRequest>(cellQuery); // На всякий случай
             }
+            
+            // Также нужно удалить старые чанки
+            var chunkQuery = em.CreateEntityQuery(typeof(UnifiedRenderTag));
+            if(!chunkQuery.IsEmpty) em.DestroyEntity(chunkQuery);
 
             var immediate = !Application.isPlaying;
             var meshSystem = world.GetExistingSystemManaged<VoronoiMeshCreateSystem>();
@@ -254,7 +251,9 @@ namespace VoronoiMapGen.Bootstrap
                         RiverWidthScale = s.RiverWidthMultiplier,
                         RiverMeanderAmplitude = s.MeanderAmp,
                         RiverMeanderFrequency = s.MeanderFreq,
-                        RiverNoiseInfluence = s.NoiseInfluence
+                        RiverNoiseInfluence = s.NoiseInfluence,
+                        // Передаем новый параметр тайлинга
+                        TextureTiling = s.TextureScale > 0.0001f ? s.TextureScale : 0.05f
                     };
                 }
             }

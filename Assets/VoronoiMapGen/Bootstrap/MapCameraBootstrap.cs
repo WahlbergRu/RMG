@@ -39,7 +39,7 @@ namespace VoronoiMapGen.Bootstrap
             TargetCamera.farClipPlane = 10000f;
             TargetCamera.nearClipPlane = 0.1f;
 
-            var world = World.DefaultGameObjectInjectionWorld;
+            World world = World.DefaultGameObjectInjectionWorld;
             _entityManager = world.EntityManager;
 
             _cameraEntity = _entityManager.CreateEntity();
@@ -48,12 +48,12 @@ namespace VoronoiMapGen.Bootstrap
             // --- ФИКС СТАРТОВОЙ ПОЗИЦИИ ---
             // Центрируем камеру на карте (500, 500), если карта 1000x1000
             // Ищем настройки карты (MapSize), чтобы узнать центр
-            var startFocus = new float3(0, 0, 0);
-            if (TryGetMapSize(out var mapSize)) startFocus = new float3(mapSize.x * 0.5f, 0, mapSize.y * 0.5f);
+            float3 startFocus = new float3(0, 0, 0);
+            if (TryGetMapSize(out float2 mapSize)) startFocus = new float3(mapSize.x * 0.5f, 0, mapSize.y * 0.5f);
 
-            var startZoom = 800f;
-            var startPitch = 60f;
-            var startYaw = 0f;
+            float startZoom = 800f;
+            float startPitch = 60f;
+            float startYaw = 0f;
 
             if (Mode == CameraMode.TopDown2D)
             {
@@ -93,7 +93,7 @@ namespace VoronoiMapGen.Bootstrap
         {
             if (!_isInitialized || !_entityManager.Exists(_cameraEntity)) return;
 
-            var currentData = _entityManager.GetComponentData<CameraSettingsData>(_cameraEntity);
+            CameraSettingsData currentData = _entityManager.GetComponentData<CameraSettingsData>(_cameraEntity);
 
             currentData.Mode = Mode;
             currentData.PanSpeed = PanSpeed;

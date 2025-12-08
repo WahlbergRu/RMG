@@ -20,8 +20,8 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
 
         protected override void OnUpdate()
         {
-            var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
-            var settings = SystemAPI.GetComponent<MapSettings>(settingsEntity);
+            Entity settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
+            MapSettings settings = SystemAPI.GetComponent<MapSettings>(settingsEntity);
             int currentMask = settings.RenderLevelMask;
 
             // Оптимизация: Если маска не менялась с прошлого кадра, ничего не делаем
@@ -29,12 +29,12 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             _lastMask = currentMask;
 
             // Создаем CommandBuffer для структурных изменений (Add/Remove DisableRendering)
-            var ecb = new EntityCommandBuffer(Allocator.Temp);
+            EntityCommandBuffer ecb = new EntityCommandBuffer(Allocator.Temp);
 
             // === 1. ПОКАЗАТЬ (Удалить DisableRendering) ===
             // Ищем Чанки (UnifiedRenderTag), которые сейчас СКРЫТЫ (имеют DisableRendering),
             // но согласно маске должны быть ВИДИМЫ.
-            foreach (var (levelData, entity) in SystemAPI.Query<RefRO<DetailLevelData>>()
+            foreach ((RefRO<DetailLevelData> levelData, Entity entity) in SystemAPI.Query<RefRO<DetailLevelData>>()
                          .WithAll<UnifiedRenderTag, DisableRendering>() // Ищем среди скрытых чанков
                          .WithEntityAccess())
             {
@@ -50,7 +50,7 @@ namespace VoronoiMapGen.Features.Rendering.Terrain
             // === 2. СКРЫТЬ (Добавить DisableRendering) ===
             // Ищем Чанки, которые сейчас ВИДИМЫ (НЕТ DisableRendering),
             // но согласно маске должны быть СКРЫТЫ.
-            foreach (var (levelData, entity) in SystemAPI.Query<RefRO<DetailLevelData>>()
+            foreach ((RefRO<DetailLevelData> levelData, Entity entity) in SystemAPI.Query<RefRO<DetailLevelData>>()
                          .WithAll<UnifiedRenderTag>()
                          .WithNone<DisableRendering>() // Ищем среди видимых чанков
                          .WithEntityAccess())

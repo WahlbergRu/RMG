@@ -25,7 +25,7 @@ namespace VoronoiMapGen.Features.Rendering
 #endif
                     if (_instance == null)
                     {
-                        var go = new GameObject("UnifiedResourceManager");
+                        GameObject go = new GameObject("UnifiedResourceManager");
                         _instance = go.AddComponent<UnifiedResourceManager>();
                         DontDestroyOnLoad(go);
                     }
@@ -39,11 +39,11 @@ namespace VoronoiMapGen.Features.Rendering
             if (_isQuitting) return;
             if (_graveyard.Count == 0) return;
 
-            var frame = Time.frameCount;
+            int frame = Time.frameCount;
             while (_graveyard.Count > 0)
                 if (frame >= _graveyard.Peek().dieTime)
                 {
-                    var item = _graveyard.Dequeue();
+                    DeadItem item = _graveyard.Dequeue();
                     if (item.obj != null) Destroy(item.obj);
                 }
                 else
@@ -54,12 +54,12 @@ namespace VoronoiMapGen.Features.Rendering
 
         private void OnDestroy()
         {
-            foreach (var kvp in _materials)
+            foreach (KeyValuePair<string, Material> kvp in _materials)
                 if (kvp.Value) DestroyImmediate(kvp.Value);
             _materials.Clear();
             while (_graveyard.Count > 0)
             {
-                var item = _graveyard.Dequeue();
+                DeadItem item = _graveyard.Dequeue();
                 if (item.obj != null) DestroyImmediate(item.obj);
             }
         }
@@ -89,11 +89,11 @@ namespace VoronoiMapGen.Features.Rendering
 
         public Material GetMaterial(string shaderName, float4 color, float smoothness)
         {
-            var key = $"{shaderName}_{color}_{smoothness}";
-            if (_materials.TryGetValue(key, out var mat) && mat != null) return mat;
+            string key = $"{shaderName}_{color}_{smoothness}";
+            if (_materials.TryGetValue(key, out Material mat) && mat != null) return mat;
 
             // Ищем шейдер
-            var shader = Shader.Find(shaderName);
+            Shader shader = Shader.Find(shaderName);
             if (!shader) 
             {
                 // Fallbacks
@@ -134,7 +134,7 @@ namespace VoronoiMapGen.Features.Rendering
                 DestroyImmediate(obj);
                 return;
             }
-            var delayFrames = Application.isPlaying ? 5 : 1;
+            int delayFrames = Application.isPlaying ? 5 : 1;
             _graveyard.Enqueue(new DeadItem { obj = obj, dieTime = Time.frameCount + delayFrames });
         }
 

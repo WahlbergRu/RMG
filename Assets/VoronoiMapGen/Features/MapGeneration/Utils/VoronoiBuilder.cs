@@ -17,46 +17,46 @@ namespace VoronoiMapGen.Utils
         {
             // 1. Вычисляем центры окружностей для всех треугольников
             // Это и есть вершины Вороного
-            var superTriStart = sites.Length; // Индекс начала супер-вершин
+            int superTriStart = sites.Length; // Индекс начала супер-вершин
 
             // Создаем временные точки для супер-треугольника, чтобы GetCircumcenter работал
-            var M = math.max(mapSize.x, mapSize.y) * 100.0f;
-            var allPoints = new NativeList<float2>(sites.Length + 3, Allocator.Temp);
+            float M = math.max(mapSize.x, mapSize.y) * 100.0f;
+            NativeList<float2> allPoints = new NativeList<float2>(sites.Length + 3, Allocator.Temp);
             allPoints.AddRange(sites);
             allPoints.Add(new float2(-M, -M));
             allPoints.Add(new float2(2 * M, -M));
             allPoints.Add(new float2(-M, 2 * M));
 
-            var circumcenters = new NativeArray<float2>(triangles.Length, Allocator.Temp);
-            for (var i = 0; i < triangles.Length; i++)
+            NativeArray<float2> circumcenters = new NativeArray<float2>(triangles.Length, Allocator.Temp);
+            for (int i = 0; i < triangles.Length; i++)
             {
-                var t = triangles[i];
-                GeometryMath.GetCircumcenter(allPoints[t.A], allPoints[t.B], allPoints[t.C], out var c, out _);
+                TriangleIndices t = triangles[i];
+                GeometryMath.GetCircumcenter(allPoints[t.A], allPoints[t.B], allPoints[t.C], out float2 c, out _);
                 circumcenters[i] = c;
             }
 
             // 2. Собираем полигоны
             // Используем MultiHashMap: Key = SiteIndex, Value = TriangleIndex
             // Это позволяет найти все треугольники, к которым принадлежит точка
-            var siteToTri = new NativeParallelMultiHashMap<int, int>(triangles.Length * 3, Allocator.Temp);
+            NativeParallelMultiHashMap<int, int> siteToTri = new NativeParallelMultiHashMap<int, int>(triangles.Length * 3, Allocator.Temp);
 
-            for (var i = 0; i < triangles.Length; i++)
+            for (int i = 0; i < triangles.Length; i++)
             {
-                var t = triangles[i];
+                TriangleIndices t = triangles[i];
                 siteToTri.Add(t.A, i);
                 siteToTri.Add(t.B, i);
                 siteToTri.Add(t.C, i);
             }
 
             // 3. Для каждого сайта строим ячейку
-            var poly = new NativeList<float2>(16, Allocator.Temp);
+            NativeList<float2> poly = new NativeList<float2>(16, Allocator.Temp);
 
-            for (var i = 0; i < sites.Length; i++)
+            for (int i = 0; i < sites.Length; i++)
             {
                 poly.Clear();
 
                 // Собираем центры соседних треугольников
-                if (siteToTri.TryGetFirstValue(i, out var tIdx, out var it))
+                if (siteToTri.TryGetFirstValue(i, out int tIdx, out NativeParallelMultiHashMapIterator<int> it))
                     do
                     {
                         poly.Add(circumcenters[tIdx]);

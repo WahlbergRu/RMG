@@ -22,27 +22,27 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
         public void Execute()
         {
             NeighborsMap.Clear();
-            var siteCount = SitePositions.Length;
+            int siteCount = SitePositions.Length;
 
             // -----------------------------------------------------------
             // ШАГ 1: Найдем дистанцию до САМОГО БЛИЗКОГО соседа для каждой точки.
             // Это даст нам "естественный размер" ячейки в данном месте карты.
             // -----------------------------------------------------------
 
-            var minNeighborDist = new NativeArray<float>(siteCount, Allocator.Temp);
+            NativeArray<float> minNeighborDist = new NativeArray<float>(siteCount, Allocator.Temp);
 
             // Инициализируем огромными значениями
-            for (var i = 0; i < siteCount; i++) minNeighborDist[i] = float.MaxValue;
+            for (int i = 0; i < siteCount; i++) minNeighborDist[i] = float.MaxValue;
 
             // Пробегаем по всем ребрам и ищем минимумы
-            for (var i = 0; i < Edges.Length; i++)
+            for (int i = 0; i < Edges.Length; i++)
             {
-                var edge = Edges[i];
-                var a = edge.SiteA;
-                var b = edge.SiteB;
+                VoronoiEdge edge = Edges[i];
+                int a = edge.SiteA;
+                int b = edge.SiteB;
                 if (a < 0 || b < 0 || a >= siteCount || b >= siteCount) continue;
 
-                var dSq = math.distancesq(SitePositions[a], SitePositions[b]);
+                float dSq = math.distancesq(SitePositions[a], SitePositions[b]);
 
                 // Сразу игнорируем совсем дикие связи по глобальному лимиту
                 if (dSq > MaxConnectionDistSq) continue;
@@ -58,29 +58,29 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
 
             // Коэффициент допуска. Если сосед в 2.5 раза дальше, чем самый близкий - это не сосед.
             // (В квадрате: 2.5 * 2.5 = 6.25)
-            var relativeThresholdSq = 6.25f;
+            float relativeThresholdSq = 6.25f;
 
-            for (var i = 0; i < Edges.Length; i++)
+            for (int i = 0; i < Edges.Length; i++)
             {
-                var edge = Edges[i];
-                var a = edge.SiteA;
-                var b = edge.SiteB;
+                VoronoiEdge edge = Edges[i];
+                int a = edge.SiteA;
+                int b = edge.SiteB;
 
                 if (a < 0 || b < 0 || a >= siteCount || b >= siteCount) continue;
 
-                var posA = SitePositions[a];
-                var posB = SitePositions[b];
+                float2 posA = SitePositions[a];
+                float2 posB = SitePositions[b];
 
-                var distSq = math.distancesq(posA, posB);
+                float distSq = math.distancesq(posA, posB);
 
                 // --- Фильтр 1: Глобальный (Океаны и ошибки генерации) ---
-                var isOceanA = Tectonics[a].IsOcean;
-                var isOceanB = Tectonics[b].IsOcean;
+                bool isOceanA = Tectonics[a].IsOcean;
+                bool isOceanB = Tectonics[b].IsOcean;
 
                 if (isOceanA && isOceanB) continue; // Вода-Вода нам не нужны для рек
 
                 // Если береговая линия - режем дистанцию жестче
-                var globalLimit = MaxConnectionDistSq;
+                float globalLimit = MaxConnectionDistSq;
                 if (isOceanA != isOceanB) globalLimit *= 0.25f;
 
                 if (distSq > globalLimit) continue;
@@ -88,15 +88,15 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                 // --- Фильтр 2: ЛОКАЛЬНЫЙ АДАПТИВНЫЙ ---
                 // У каждой точки есть свое понимание "близко" и "далеко".
                 // Если для точки А этот сосед слишком далек ОТНОСИТЕЛЬНО её масштаба...
-                var limitA = minNeighborDist[a] * relativeThresholdSq;
+                float limitA = minNeighborDist[a] * relativeThresholdSq;
                 if (distSq > limitA) continue;
 
                 // И для точки Б тоже проверим (симметрия не обязательна, но желательна для графа)
-                var limitB = minNeighborDist[b] * relativeThresholdSq;
+                float limitB = minNeighborDist[b] * relativeThresholdSq;
                 if (distSq > limitB) continue;
 
                 // --- Фильтр пройден, добавляем ---
-                var dist = math.sqrt(distSq);
+                float dist = math.sqrt(distSq);
                 NeighborsMap.Add(a, new NeighborInfo { Index = b, Distance = dist });
                 NeighborsMap.Add(b, new NeighborInfo { Index = a, Distance = dist });
             }

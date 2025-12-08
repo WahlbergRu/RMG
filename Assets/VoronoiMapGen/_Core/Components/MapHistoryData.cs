@@ -22,7 +22,7 @@ namespace VoronoiMapGen.Features.Data
         /// </summary>
         public void StoreLevel(MapLevelData data)
         {
-            var lvl = data.LevelIndex;
+            int lvl = data.LevelIndex;
             
             // Safety: If there is old data at this index, we must dispose it before overwriting.
             if (_levels[lvl].IsCreated) 
@@ -50,7 +50,7 @@ namespace VoronoiMapGen.Features.Data
         public void Dispose()
         {
             if (_levels == null) return;
-            for (var i = 0; i < _levels.Length; i++)
+            for (int i = 0; i < _levels.Length; i++)
             {
                 if (_levels[i].IsCreated)
                 {
