@@ -6,278 +6,187 @@ namespace VoronoiMapGen.Bootstrap
     [CustomEditor(typeof(MapGeneratorBootstrap))]
     public class MapGeneratorBootstrapEditor : Editor
     {
-        private SerializedProperty debugColorsProp;
-        private SerializedProperty debugLevelsProp;
-
-        private GUIStyle headerStyle;
-
-        // Configuration
-        private SerializedProperty levelConfigsProp;
-        private SerializedProperty mapSizeProp;
-
-        // Colors
-        private SerializedProperty oceanColorProp,
-            coastColorProp,
-            iceColorProp,
-            desertColorProp,
-            grasslandColorProp,
-            forestColorProp,
-            mountainColorProp,
-            snowColorProp;
-
-        private SerializedProperty renderLevelsProp;
-        private SerializedProperty riverDebugLevelsProp;
-
-        private SerializedProperty riverRenderLevelsProp;
-
-        // Core
-        private SerializedProperty seedProp;
-
-        // Debug & Gizmos
-        private SerializedProperty showRiverGizmosProp;
-
-        // Rendering & Rivers
-        private SerializedProperty showRiversProp;
-        private SerializedProperty showWireframeProp;
-        private SerializedProperty terrainHeightScaleProp;
-        private SerializedProperty useAutoLodProp; // <-- Новая галочка
-        private SerializedProperty useCacheProp;
-        private SerializedProperty visualConfigsProp;
+        // General
+        private SerializedProperty seedProp, useCacheProp, mapSizeProp, terrainHeightScaleProp;
+        // Climate
+        private SerializedProperty baseTempProp, tempHeightProp, baseMoistureProp, rainIntProp, fluxThresholdProp;
+        // Civ
+        private SerializedProperty globalPopScalarProp, minPopOutpostProp, minPopTownProp, minPopMetropolisProp, showSettlementsProp;
+        private SerializedProperty minSiteQualityProp, townSpawnChanceProp, outpostSpawnChanceProp;
+        // Logic
+        private SerializedProperty useAutoLodProp, levelsProp;
+        // Render
+        private SerializedProperty showRiversProp, riverRenderLevelsProp, renderLevelsProp;
+        private SerializedProperty showWireframeProp, debugLevelsProp, debugColorsProp, showRiverGizmosProp, riverDebugLevelsProp;
 
         private void OnEnable()
         {
-            // Core
             seedProp = serializedObject.FindProperty("Seed");
             useCacheProp = serializedObject.FindProperty("UseCache");
             mapSizeProp = serializedObject.FindProperty("MapSize");
             terrainHeightScaleProp = serializedObject.FindProperty("TerrainHeightScale");
 
-            // Logic & Styles
-            levelConfigsProp = serializedObject.FindProperty("LevelConfigs");
-            visualConfigsProp = serializedObject.FindProperty("VisualConfigs");
-            useAutoLodProp = serializedObject.FindProperty("UseAutoLOD"); // <-- Связываем
+            baseTempProp = serializedObject.FindProperty("BaseTemperature");
+            tempHeightProp = serializedObject.FindProperty("TempHeightImpact");
+            baseMoistureProp = serializedObject.FindProperty("BaseMoisture");
+            rainIntProp = serializedObject.FindProperty("RainIntensity");
+            fluxThresholdProp = serializedObject.FindProperty("RiverFluxThreshold");
 
-            // Render
+            showSettlementsProp = serializedObject.FindProperty("ShowSettlements");
+            globalPopScalarProp = serializedObject.FindProperty("GlobalPopScalar");
+            minPopOutpostProp = serializedObject.FindProperty("MinPopOutpost");
+            minPopTownProp = serializedObject.FindProperty("MinPopTown");
+            minPopMetropolisProp = serializedObject.FindProperty("MinPopMetropolis");
+            minSiteQualityProp = serializedObject.FindProperty("MinSiteQuality");
+            townSpawnChanceProp = serializedObject.FindProperty("TownSpawnChance");
+            outpostSpawnChanceProp = serializedObject.FindProperty("OutpostSpawnChance");
+
+            useAutoLodProp = serializedObject.FindProperty("UseAutoLOD");
+            levelsProp = serializedObject.FindProperty("Levels"); 
+
             showRiversProp = serializedObject.FindProperty("ShowRivers");
-            riverRenderLevelsProp = serializedObject.FindProperty("RiverRenderLevels");
             renderLevelsProp = serializedObject.FindProperty("RenderLevels");
+            riverRenderLevelsProp = serializedObject.FindProperty("RiverRenderLevels");
 
-            // Debug
-            showRiverGizmosProp = serializedObject.FindProperty("ShowRiverGizmos");
-            riverDebugLevelsProp = serializedObject.FindProperty("RiverDebugLevels");
             showWireframeProp = serializedObject.FindProperty("ShowWireframe");
             debugLevelsProp = serializedObject.FindProperty("DebugLevels");
             debugColorsProp = serializedObject.FindProperty("DebugColors");
-
-            // Colors
-            oceanColorProp = serializedObject.FindProperty("oceanColor");
-            coastColorProp = serializedObject.FindProperty("coastColor");
-            iceColorProp = serializedObject.FindProperty("iceColor");
-            desertColorProp = serializedObject.FindProperty("desertColor");
-            grasslandColorProp = serializedObject.FindProperty("grasslandColor");
-            forestColorProp = serializedObject.FindProperty("forestColor");
-            mountainColorProp = serializedObject.FindProperty("mountainColor");
-            snowColorProp = serializedObject.FindProperty("snowColor");
+            showRiverGizmosProp = serializedObject.FindProperty("ShowRiverGizmos");
+            riverDebugLevelsProp = serializedObject.FindProperty("RiverDebugLevels");
         }
 
         public override void OnInspectorGUI()
         {
             MapGeneratorBootstrap bootstrap = (MapGeneratorBootstrap)target;
             serializedObject.Update();
-
-            headerStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                fontSize = 11,
-                margin = new RectOffset(0, 0, 12, 4),
-                alignment = TextAnchor.MiddleLeft
+            
+            var headerStyle = new GUIStyle(EditorStyles.boldLabel) {
+                fontSize = 11, margin = new RectOffset(0, 0, 12, 4), alignment = TextAnchor.MiddleLeft
             };
+            var bgStyle = EditorStyles.helpBox;
 
             EditorGUI.BeginChangeCheck();
 
-            DrawHeader("WORLD GENERATION (Require Rebuild)");
-
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            {
-                EditorGUILayout.BeginHorizontal();
+            // 1. WORLD CORE
+            DrawSection("CORE", headerStyle, bgStyle, () => {
                 EditorGUILayout.PropertyField(seedProp);
-                if (GUILayout.Button("Dice", GUILayout.Width(45)))
-                {
-                    seedProp.intValue = Random.Range(0, 99999);
-                    GUI.FocusControl(null);
+                // Dice
+                var r = GUILayoutUtility.GetLastRect(); 
+                if (GUI.Button(new Rect(r.width - 25, r.y, 45, r.height), "Dice")) {
+                     seedProp.intValue = Random.Range(0, 99999); GUI.FocusControl(null); 
                 }
-
-                EditorGUILayout.EndHorizontal();
-
+                
                 EditorGUILayout.PropertyField(useCacheProp);
                 EditorGUILayout.PropertyField(mapSizeProp);
                 EditorGUILayout.PropertyField(terrainHeightScaleProp);
-            }
-            EditorGUILayout.EndVertical();
+            });
 
-            DrawHeader("CONFIGURATIONS");
-
-            // Галочка Авто-ЛOД (Важно)
-            EditorGUILayout.PropertyField(useAutoLodProp);
-            if (useAutoLodProp.boolValue)
-                EditorGUILayout.HelpBox(
-                    "LOD is managed by Camera Height (System driven). Manual layer controls are disabled.",
-                    MessageType.Info);
-
-            if (levelConfigsProp != null)
-            {
-                levelConfigsProp.isExpanded = EditorGUILayout.Foldout(levelConfigsProp.isExpanded,
-                    $"Logic Rules (Count: {levelConfigsProp.arraySize})", true);
-                if (levelConfigsProp.isExpanded)
+            // 2. SIMULATION
+            DrawSection("SIMULATION PARAMETERS", headerStyle, bgStyle, () => {
+                EditorGUILayout.LabelField("Climate", EditorStyles.miniBoldLabel);
+                EditorGUILayout.PropertyField(baseTempProp);
+                EditorGUILayout.PropertyField(tempHeightProp);
+                EditorGUILayout.PropertyField(baseMoistureProp);
+                
+                GUILayout.Space(5);
+                EditorGUILayout.LabelField("Hydrology", EditorStyles.miniBoldLabel);
+                EditorGUILayout.PropertyField(rainIntProp);
+                EditorGUILayout.PropertyField(fluxThresholdProp);
+                
+                GUILayout.Space(5);
+                EditorGUILayout.LabelField("Civilization", EditorStyles.miniBoldLabel);
+                EditorGUILayout.PropertyField(showSettlementsProp);
+                if (showSettlementsProp.boolValue)
                 {
-                    EditorGUI.indentLevel++;
-                    // true = показывать детей (чтобы видеть поле LOD Threshold)
-                    EditorGUILayout.PropertyField(levelConfigsProp, true);
-                    EditorGUI.indentLevel--;
+                    EditorGUILayout.PropertyField(globalPopScalarProp);
+                    EditorGUILayout.Space(2);
+                    EditorGUILayout.LabelField("Spawn Chances (Filters)", EditorStyles.miniBoldLabel);
+                    EditorGUILayout.PropertyField(minSiteQualityProp);
+                    EditorGUILayout.PropertyField(townSpawnChanceProp);
+                    EditorGUILayout.PropertyField(outpostSpawnChanceProp);
+                    
+                    EditorGUILayout.Space(2);
+                    EditorGUILayout.LabelField("Thresholds", EditorStyles.miniBoldLabel);
+                    EditorGUILayout.PropertyField(minPopOutpostProp);
+                    EditorGUILayout.PropertyField(minPopTownProp);
+                    EditorGUILayout.PropertyField(minPopMetropolisProp);
                 }
-            }
+            });
 
-            if (visualConfigsProp != null)
-            {
-                visualConfigsProp.isExpanded = EditorGUILayout.Foldout(visualConfigsProp.isExpanded,
-                    $"Visual Styles (Count: {visualConfigsProp.arraySize})", true);
-                if (visualConfigsProp.isExpanded)
-                {
-                    EditorGUI.indentLevel++;
-                    EditorGUILayout.PropertyField(visualConfigsProp, true);
-                    EditorGUI.indentLevel--;
-                }
-            }
+            // 3. MAP HIERARCHY (Профили)
+            DrawSection("MAP HIERARCHY", headerStyle, bgStyle, () => {
+                EditorGUILayout.PropertyField(useAutoLodProp);
+                GUILayout.Space(5);
+                EditorGUILayout.PropertyField(levelsProp, true); 
+            });
 
-            DrawHeader("RENDER VISIBILITY");
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            {
-                // Если AutoLOD включен, блокируем ручной выбор уровней, чтобы не путать
+            // 4. RENDERING & DEBUG
+            DrawSection("VISIBILITY & DEBUG", headerStyle, bgStyle, () => {
+                
+                // Terrain Layers
                 EditorGUI.BeginDisabledGroup(useAutoLodProp.boolValue);
-                {
-                    EditorGUILayout.LabelField("Terrain Meshes", EditorStyles.miniBoldLabel);
-                    DrawCompactLevelMask(renderLevelsProp, "Terrain Layers");
-
-                    EditorGUILayout.Space(6);
-
-                    EditorGUILayout.LabelField("River Meshes", EditorStyles.miniBoldLabel);
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(showRiversProp, new GUIContent("Enable Generation"));
-                    EditorGUILayout.EndHorizontal();
-
-                    if (showRiversProp.boolValue)
-                    {
-                        EditorGUI.indentLevel++;
-                        DrawCompactLevelMask(riverRenderLevelsProp, "River Layers");
-                        EditorGUI.indentLevel--;
-                    }
-                }
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PrefixLabel("Terrain");
+                DrawCompactLevelMask(renderLevelsProp);
+                EditorGUILayout.EndHorizontal();
+                
+                // Rivers
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(showRiversProp, GUIContent.none, GUILayout.Width(20));
+                EditorGUILayout.LabelField("Rivers", GUILayout.Width(50));
+                if(showRiversProp.boolValue) DrawCompactLevelMask(riverRenderLevelsProp);
+                EditorGUILayout.EndHorizontal();
                 EditorGUI.EndDisabledGroup();
-            }
-            EditorGUILayout.EndVertical();
 
-            // Если были изменения -> ребилд
-            if (EditorGUI.EndChangeCheck())
-            {
+                GUILayout.Space(8);
+                EditorGUILayout.LabelField("Gizmos (Editor Only)", EditorStyles.miniBoldLabel);
+
+                // Wireframe
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(showWireframeProp, GUIContent.none, GUILayout.Width(20));
+                EditorGUILayout.LabelField("Wireframe", GUILayout.Width(80));
+                if (showWireframeProp.boolValue) {
+                     DrawCompactLevelMask(debugLevelsProp);
+                }
+                EditorGUILayout.EndHorizontal();
+                
+                // River Gizmos
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(showRiverGizmosProp, GUIContent.none, GUILayout.Width(20));
+                EditorGUILayout.LabelField("River Graph", GUILayout.Width(80));
+                if (showRiverGizmosProp.boolValue) {
+                    DrawCompactLevelMask(riverDebugLevelsProp); // <-- Теперь эта переменная существует и отрисовывается
+                }
+                EditorGUILayout.EndHorizontal();
+            });
+            
+            if (EditorGUI.EndChangeCheck()) {
                 serializedObject.ApplyModifiedProperties();
                 if (Application.isPlaying && GUIUtility.hotControl == 0) bootstrap.ResetVisualization();
             }
-
-            DrawHeader("DEBUG TOOLS (Scene View)");
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            {
-                // Grid
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(showWireframeProp, new GUIContent("Show Terrain Grid"));
-                EditorGUILayout.EndHorizontal();
-
-                if (showWireframeProp.boolValue)
-                {
-                    EditorGUI.indentLevel++;
-                    DrawCompactLevelMask(debugLevelsProp, "Grid Levels");
-                    if (debugColorsProp != null)
-                        EditorGUILayout.PropertyField(debugColorsProp, new GUIContent("Grid Colors"), false);
-                    EditorGUI.indentLevel--;
-                }
-
-                EditorGUILayout.Space(6);
-
-                // River Graph
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(showRiverGizmosProp, new GUIContent("Show River Graph"));
-                EditorGUILayout.EndHorizontal();
-
-                if (showRiverGizmosProp.boolValue)
-                {
-                    EditorGUI.indentLevel++;
-                    DrawCompactLevelMask(riverDebugLevelsProp, "Graph Levels");
-                    EditorGUI.indentLevel--;
-                }
-            }
-            EditorGUILayout.EndVertical();
-
+            
             GUILayout.Space(10);
-            bool showColors = EditorPrefs.GetBool("MapGen_ShowColors", false);
-            showColors = EditorGUILayout.Foldout(showColors, "Biome Palette Colors", true);
-            if (showColors)
-            {
-                EditorGUI.indentLevel++;
-                DrawProp(oceanColorProp);
-                DrawProp(coastColorProp);
-                DrawProp(iceColorProp);
-                DrawProp(desertColorProp);
-                DrawProp(grasslandColorProp);
-                DrawProp(forestColorProp);
-                DrawProp(mountainColorProp);
-                DrawProp(snowColorProp);
-                EditorGUI.indentLevel--;
-            }
-
-            EditorPrefs.SetBool("MapGen_ShowColors", showColors);
-
-            serializedObject.ApplyModifiedProperties();
-
-            GUILayout.Space(15);
-            GUI.backgroundColor = new Color(0.9f, 0.9f, 1f);
-            if (GUILayout.Button("FORCE REBUILD", GUILayout.Height(30)))
-                if (Application.isPlaying)
-                    bootstrap.ResetVisualization();
-            GUI.backgroundColor = Color.white;
-            GUILayout.Space(10);
+            if (GUILayout.Button("FORCE REBUILD", GUILayout.Height(30))) 
+                 if (Application.isPlaying) bootstrap.ResetVisualization();
         }
 
-        // --- Helpers ---
-
-        private void DrawHeader(string title)
+        private void DrawSection(string title, GUIStyle style, GUIStyle boxStyle, System.Action content)
         {
             GUILayout.Space(5);
-            GUILayout.Label(title, headerStyle);
+            GUILayout.Label(title, style);
+            EditorGUILayout.BeginVertical(boxStyle);
+            content.Invoke();
+            EditorGUILayout.EndVertical();
         }
 
-        private void DrawProp(SerializedProperty prop)
-        {
-            if (prop != null) EditorGUILayout.PropertyField(prop);
-        }
-
-        private void DrawCompactLevelMask(SerializedProperty listProp, string label)
-        {
+        private void DrawCompactLevelMask(SerializedProperty listProp) {
             if (listProp == null || !listProp.isArray) return;
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(label);
-
-            int originalIndent = EditorGUI.indentLevel;
-            EditorGUI.indentLevel = 0;
-
-            for (int i = 0; i < listProp.arraySize; i++)
-            {
-                SerializedProperty element = listProp.GetArrayElementAtIndex(i);
-                bool val = element.boolValue;
-                bool newVal = EditorGUILayout.ToggleLeft($"L{i}", val, GUILayout.Width(45));
-                if (newVal != val) element.boolValue = newVal;
+            var originalIndent = EditorGUI.indentLevel; EditorGUI.indentLevel = 0;
+            for (int i = 0; i < listProp.arraySize; i++) {
+                var el = listProp.GetArrayElementAtIndex(i);
+                el.boolValue = EditorGUILayout.ToggleLeft($"L{i}", el.boolValue, GUILayout.Width(35));
             }
-
             EditorGUI.indentLevel = originalIndent;
-            EditorGUILayout.EndHorizontal();
         }
     }
 }

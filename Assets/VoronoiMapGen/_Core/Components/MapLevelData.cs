@@ -1,13 +1,11 @@
 ﻿using Unity.Collections;
 using Unity.Mathematics;
 using VoronoiMapGen.Features.MapGeneration.Components;
+// ВАЖНО: Подключаем цивилизацию
+using VoronoiMapGen.Features.Civilization.Components; 
 
 namespace VoronoiMapGen.Features.Data
 {
-    /// <summary>
-    ///     Единый контейнер (Snapshot) для всех данных одного уровня генерации.
-    ///     Восстановленный файл.
-    /// </summary>
     public struct MapLevelData
     {
         public int LevelIndex;
@@ -16,19 +14,20 @@ namespace VoronoiMapGen.Features.Data
         public NativeArray<VoronoiCell> Cells;
         public NativeArray<VoronoiEdge> Edges;
 
-        // Слои данных симуляции
+        // Данные симуляции
         public NativeArray<TectonicPlateData> Tectonics;
         public NativeArray<ClimateData> Climate;
         public NativeArray<HydrologyData> Hydrology;
         public NativeArray<BiomeData> Biomes;
+        public NativeArray<DistrictData> Districts; 
 
-        // Проверка на валидность (создан ли уровень)
+        
+        // Данные поселений
+        public NativeArray<SettlementData> Settlements;
+
         public bool IsCreated => Sites.IsCreated && Cells.IsCreated;
         public int Length => Sites.Length;
 
-        /// <summary>
-        ///     Безопасная очистка всех ресурсов уровня
-        /// </summary>
         public void Dispose()
         {
             if (Sites.IsCreated) Sites.Dispose();
@@ -40,6 +39,9 @@ namespace VoronoiMapGen.Features.Data
             if (Climate.IsCreated) Climate.Dispose();
             if (Hydrology.IsCreated) Hydrology.Dispose();
             if (Biomes.IsCreated) Biomes.Dispose();
+            if (Districts.IsCreated) Districts.Dispose();
+            
+            if (Settlements.IsCreated) Settlements.Dispose();
         }
     }
 }

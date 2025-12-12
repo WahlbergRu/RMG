@@ -1,3 +1,6 @@
+// ============================================================
+// FILE: Assets\VoronoiMapGen\Bootstrap\MapGeneratorBootstrap.cs
+// ============================================================
 using System;
 using Unity.Collections;
 using Unity.Entities;
@@ -12,139 +15,122 @@ using VoronoiMapGen.Features.Rendering.Terrain;
 
 namespace VoronoiMapGen.Bootstrap
 {
-    [Serializable]
-    public class VisualLevelSettings
-    {
-        public string Name = "Level Settings";
-        public TerrainStyle Style = TerrainStyle.Blocky;
-        public float HeightScale = 50.0f;
-        public float BottomDepth = 30.0f;
-        [Range(0f, 2f)] public float TopSurfaceNoise = 0.2f;
-
-        [Header("Stratified Settings")] 
-        [Range(1, 10)] public int RockLayers = 3;
-        [Range(0f, 2f)] public float LayerInset = 0.3f;
-
-        [Header("River Visuals")] 
-        [Tooltip("Множитель ширины реки")] [Range(0.1f, 5f)] public float RiverWidthMultiplier = 1.0f;
-        [Tooltip("Амплитуда изгибов (змейка)")] [Range(0f, 20f)] public float MeanderAmp = 2.0f;
-        [Tooltip("Частота изгибов")] [Range(0.001f, 0.5f)] public float MeanderFreq = 0.02f;
-        [Tooltip("Влияние шума")] [Range(0f, 5f)] public float NoiseInfluence = 1.0f;
-
-        // --- НОВАЯ НАСТРОЙКА ---
-        [Header("Texturing")]
-        [Tooltip("Масштаб UV (меньше = крупнее текстура). 0.05 по умолчанию")]
-        public float TextureScale = 0.05f; 
-    }
-
     public class MapGeneratorBootstrap : MonoBehaviour
     {
-        [Header("General Settings")] public int Seed = 12345;
-
-        public bool UseCache = true;
+        [Header("World Core")] 
+        public int Seed = 12345;
         public Vector2 MapSize = new(1000, 1000);
         public float TerrainHeightScale = 50.0f;
+        public bool UseCache = true;
 
-        // --- RIVERS SETTINGS ---
-        public bool ShowRivers = true;
-        public bool[] RiverRenderLevels = new bool[4];
-        public bool ShowRiverGizmos;
-        public bool[] RiverDebugLevels = new bool[4];
+        [Header("Climate & Hydrology")]
+        [Range(0f, 1f)] public float BaseTemperature = 0.5f;        
+        [Range(0f, 2f)] public float TempHeightImpact = 0.9f;       
+        [Range(0f, 1f)] public float BaseMoisture = 0.5f;
+        [Space]
+        [Range(0.1f, 5.0f)] public float RainIntensity = 1.0f;      
+        [Range(1.0f, 50f)] public float RiverFluxThreshold = 8.0f; 
 
-        [Header("Level Configurations")]
+        [Header("Civilization Balance")]
+        public bool ShowSettlements = true;
+        public float GlobalPopScalar = 2000f; 
+        
+        [Space]
+        [Range(0.0f, 1.0f)] public float MinSiteQuality = 0.6f;
+        [Range(0.0f, 1.0f)] public float TownSpawnChance = 0.2f;
+        [Range(0.0f, 1.0f)] public float OutpostSpawnChance = 0.15f; 
+
+        [Space]
+        public int MinPopOutpost = 3000;
+        public int MinPopTown = 10000;
+        public int MinPopMetropolis = 25000;
+
+        [Header("Levels Configuration")] 
         public bool UseAutoLOD = true;
+        [SerializeField] private MapLevelProfile[] Levels; 
 
-        public LevelSettings[] LevelConfigs = new LevelSettings[1];
+        [Header("Render Mask")]
+        public bool ShowRivers = true;
+        [HideInInspector] public bool[] RiverRenderLevels = new bool[4];
+        [HideInInspector] public bool[] RenderLevels = new bool[4];
 
-        [Header("Visual Styles Per Level")] public VisualLevelSettings[] VisualConfigs = new VisualLevelSettings[1];
-
+        [Header("Debug")]
         public bool ShowWireframe;
+        public bool ShowRiverGizmos;
         public bool[] DebugLevels = new bool[4];
+        public bool[] RiverDebugLevels = new bool[4];
         public Color[] DebugColors = new Color[4];
 
-        public bool[] RenderLevels = new bool[4];
+        private void OnValidate()
+        {
+            if (Levels == null || Levels.Length == 0)
+                Levels = MapPresets.GetDefault5Levels();
 
-        [HideInInspector] public Color oceanColor = new(0.1f, 0.3f, 0.8f, 1);
-        [HideInInspector] public Color coastColor = new(0.9f, 0.8f, 0.6f, 1);
-        [HideInInspector] public Color iceColor = new(0.8f, 0.9f, 1.0f, 1);
-        [HideInInspector] public Color desertColor = new(0.9f, 0.8f, 0.5f, 1);
-        [HideInInspector] public Color grasslandColor = new(0.3f, 0.7f, 0.2f, 1);
-        [HideInInspector] public Color forestColor = new(0.1f, 0.5f, 0.1f, 1);
-        [HideInInspector] public Color mountainColor = new(0.5f, 0.4f, 0.3f, 1);
-        [HideInInspector] public Color snowColor = new(0.95f, 0.95f, 0.95f, 1);
+            int count = Levels.Length;
+            ResizeArray(ref RiverRenderLevels, count, true);
+            ResizeArray(ref RenderLevels, count, true);
+            ResizeArray(ref DebugLevels, count, false);
+            ResizeArray(ref RiverDebugLevels, count, true);
+            ResizeArray(ref DebugColors, count, Color.white);
+        }
 
         private void Start()
         {
             var world = World.DefaultGameObjectInjectionWorld;
             var em = world.EntityManager;
-            var settingsEntity = em.CreateEntity();
 
-            var mapSettings = new MapSettings
-            {
-                Seed = Seed, MapSize = MapSize, LevelsCount = LevelConfigs.Length,
-                TerrainHeightScale = TerrainHeightScale,
-                UseCache = UseCache,
-                UseAutoLOD = UseAutoLOD, 
+            // -----------------------------------------------------------
+            // 1. СОЗДАНИЕ СИНГЛТОНА НАСТРОЕК + СТАТУСА ГЕНЕРАЦИИ
+            // -----------------------------------------------------------
+            var settingsArchetype = em.CreateArchetype(
+                typeof(MapSettings),
+                typeof(LevelSettings),      
+                typeof(TerrainVisualData),
+                // !!! САМОЕ ВАЖНОЕ: Компонент, который слушает UI !!!
+                typeof(GenerationStatus) 
+            );
 
-                ShowDebugWireframe = ShowWireframe,
-                ShowRivers = ShowRivers,
-                ShowRiverGizmos = ShowRiverGizmos,
+            var settingsEntity = em.CreateEntity(settingsArchetype);
+            
+            // Защита от пустого массива
+            if (Levels == null || Levels.Length == 0) 
+                Levels = MapPresets.GetDefault5Levels();
 
-                DebugLevelMask = CalculateMask(DebugLevels),
-                RenderLevelMask = CalculateMask(RenderLevels),
-                RiverRenderMask = CalculateMask(RiverRenderLevels),
-                RiverDebugMask = CalculateMask(RiverDebugLevels),
-
-                DebugLayerColors = new FixedList128Bytes<float4>(),
-                BiomeColors = new FixedList512Bytes<BiomeColorEntry>()
-            };
-
+            // Заполняем настройки карты
+            var mapSettings = CreateMapSettingsStruct();
+            
             foreach (var c in DebugColors) mapSettings.DebugLayerColors.Add(new float4(c.r, c.g, c.b, 1f));
+            AddBiomeColors(ref mapSettings);
+            
+            em.SetComponentData(settingsEntity, mapSettings);
 
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Ocean, color = new float4(0.1f, 0.3f, 0.8f, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Coast, color = new float4(coastColor.r, coastColor.g, coastColor.b, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Ice, color = new float4(iceColor.r, iceColor.g, iceColor.b, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Desert, color = new float4(desertColor.r, desertColor.g, desertColor.b, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Grassland, color = new float4(grasslandColor.r, grasslandColor.g, grasslandColor.b, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Forest, color = new float4(forestColor.r, forestColor.g, forestColor.b, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Mountain, color = new float4(mountainColor.r, mountainColor.g, mountainColor.b, 1) });
-            mapSettings.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Snow, color = new float4(snowColor.r, snowColor.g, snowColor.b, 1) });
-
-            em.AddComponentData(settingsEntity, mapSettings);
-
-            var logicBuf = em.AddBuffer<LevelSettings>(settingsEntity);
-            for (var i = 0; i < LevelConfigs.Length; i++) logicBuf.Add(LevelConfigs[i]);
-
-            var visBuf = em.AddBuffer<TerrainVisualData>(settingsEntity);
-            for (var i = 0; i < VisualConfigs.Length; i++)
+            // -----------------------------------------------------------
+            // 2. ИНИЦИАЛИЗАЦИЯ СТАТУСА (УБИРАЕМ "WAIT...")
+            // -----------------------------------------------------------
+            // Как только это выполнится, UI поменяет текст на "Booting up..."
+            em.SetComponentData(settingsEntity, new GenerationStatus
             {
-                var s = VisualConfigs[i];
-                visBuf.Add(new TerrainVisualData
-                {
-                    Style = s.Style,
-                    HeightScale = s.HeightScale,
-                    BottomDepth = s.BottomDepth,
-                    TopNoiseAmplitude = s.TopSurfaceNoise,
-                    StrataCount = s.RockLayers,
-                    StrataInset = s.LayerInset,
-                    StrataJitter = 0.1f,
-                    RiverWidthScale = s.RiverWidthMultiplier,
-                    RiverMeanderAmplitude = s.MeanderAmp,
-                    RiverMeanderFrequency = s.MeanderFreq,
-                    RiverNoiseInfluence = s.NoiseInfluence,
-                    
-                    // --- Запись значения в ECS компонент ---
-                    TextureTiling = s.TextureScale > 0.0001f ? s.TextureScale : 0.05f
-                });
+                TotalLevels = Levels.Length,
+                ProcessedLevels = 0,
+                TotalProgress = 0f,
+                CurrentStepName = "Booting up...", 
+                IsCompleted = false
+            });
+
+            // 3. Заполняем буферы настроек уровней
+            var logicBuf = em.GetBuffer<LevelSettings>(settingsEntity);
+            var visBuf = em.GetBuffer<TerrainVisualData>(settingsEntity);
+
+            foreach (var profile in Levels)
+            {
+                logicBuf.Add(ConvertToLogic(profile));
+                visBuf.Add(ConvertToVisual(profile));
             }
         }
 
         private void Update()
         {
-            // ОПТИМИЗАЦИЯ: НЕ ВЫЗЫВАЕМ В UPDATE КАЖДЫЙ КАДР ДЛЯ ПРОДАКШЕНА
 #if UNITY_EDITOR
-            // Разрешаем обновление только в режиме редактора для удобства настройки
-            // Но лучше добавить проверку на изменения
             if (!Application.isPlaying) 
             {
                  var world = World.DefaultGameObjectInjectionWorld;
@@ -153,130 +139,136 @@ namespace VoronoiMapGen.Bootstrap
 #endif
         }
 
-        private void OnValidate()
-        {
-            var targetLen = LevelConfigs.Length;
-            if (targetLen == 0) return;
-
-            if (VisualConfigs.Length != targetLen) ResizeArray(ref VisualConfigs, targetLen, new VisualLevelSettings());
-            if (DebugLevels.Length != targetLen) ResizeArray(ref DebugLevels, targetLen, true);
-            if (RenderLevels.Length != targetLen) ResizeArray(ref RenderLevels, targetLen, true);
-            if (RiverRenderLevels.Length != targetLen) ResizeArray(ref RiverRenderLevels, targetLen, true);
-            if (RiverDebugLevels.Length != targetLen) ResizeArray(ref RiverDebugLevels, targetLen, true);
-            if (DebugColors.Length != targetLen) ResizeArray(ref DebugColors, targetLen, Color.magenta);
-        }
-
-        public void ResetVisualization()
-        {
-            var world = World.DefaultGameObjectInjectionWorld;
-            if (world == null) return;
-            var em = world.EntityManager;
-
-            em.CompleteAllTrackedJobs();
-            UpdateSettingsToECS(em);
-
-            // Очистка рек
-            var chunkRiverQuery = em.CreateEntityQuery(typeof(RiverChunkTag));
-            if (!chunkRiverQuery.IsEmpty) em.DestroyEntity(chunkRiverQuery);
-
-            var oldRiverQuery = em.CreateEntityQuery(typeof(RiverSegmentOwner));
-            if (!oldRiverQuery.IsEmpty) em.DestroyEntity(oldRiverQuery);
-
-            // Очистка чанков и старых данных ячеек
-            var cellQuery = em.CreateEntityQuery(typeof(VoronoiCell), typeof(VoronoiCellMeshTag));
-            if (!cellQuery.IsEmpty)
-            {
-                em.RemoveComponent<VoronoiCellMeshTag>(cellQuery);
-                em.RemoveComponent<ProceduralMeshRequest>(cellQuery); // На всякий случай
-            }
-            
-            // Также нужно удалить старые чанки
-            var chunkQuery = em.CreateEntityQuery(typeof(UnifiedRenderTag));
-            if(!chunkQuery.IsEmpty) em.DestroyEntity(chunkQuery);
-
-            var immediate = !Application.isPlaying;
-            var meshSystem = world.GetExistingSystemManaged<VoronoiMeshCreateSystem>();
-            if (meshSystem != null) meshSystem.CleanupResources(immediate);
-
-            var riverSystem = world.GetExistingSystemManaged<RiverRenderingSystem>();
-            if (riverSystem != null) riverSystem.CleanupResources(immediate);
-        }
-
         public void UpdateSettingsToECS(EntityManager em)
         {
             var query = em.CreateEntityQuery(typeof(MapSettings));
             if (!query.HasSingleton<MapSettings>()) return;
-
             var entity = query.GetSingletonEntity();
-            var currentData = em.GetComponentData<MapSettings>(entity);
-
-            currentData.UseAutoLOD = UseAutoLOD;
-
-            if (!UseAutoLOD)
-            {
-                currentData.RenderLevelMask = CalculateMask(RenderLevels);
-                currentData.RiverRenderMask = CalculateMask(RiverRenderLevels);
-            }
-
-            currentData.DebugLevelMask = CalculateMask(DebugLevels);
-            currentData.RiverDebugMask = CalculateMask(RiverDebugLevels);
-            currentData.ShowDebugWireframe = ShowWireframe;
-            currentData.TerrainHeightScale = TerrainHeightScale;
-            currentData.ShowRivers = ShowRivers;
-            currentData.ShowRiverGizmos = ShowRiverGizmos;
-
+            
+            var currentData = CreateMapSettingsStruct();
+            
             currentData.DebugLayerColors.Clear();
-            foreach (var c in DebugColors)
-                if (currentData.DebugLayerColors.Length < currentData.DebugLayerColors.Capacity)
-                    currentData.DebugLayerColors.Add(new float4(c.r, c.g, c.b, 1f));
+            foreach (var c in DebugColors) currentData.DebugLayerColors.Add(new float4(c.r, c.g, c.b, 1f));
+            AddBiomeColors(ref currentData);
+            
             em.SetComponentData(entity, currentData);
-
-            if (em.HasBuffer<TerrainVisualData>(entity))
+            
+            if (em.HasBuffer<TerrainVisualData>(entity) && Levels != null)
             {
-                var buf = em.GetBuffer<TerrainVisualData>(entity);
-                if (buf.Length != VisualConfigs.Length) buf.ResizeUninitialized(VisualConfigs.Length);
-
-                for (var i = 0; i < VisualConfigs.Length; i++)
-                {
-                    var s = VisualConfigs[i];
-                    buf[i] = new TerrainVisualData
-                    {
-                        Style = s.Style,
-                        HeightScale = s.HeightScale,
-                        BottomDepth = s.BottomDepth,
-                        TopNoiseAmplitude = s.TopSurfaceNoise,
-                        StrataCount = s.RockLayers,
-                        StrataInset = s.LayerInset,
-                        StrataJitter = 0.1f,
-                        RiverWidthScale = s.RiverWidthMultiplier,
-                        RiverMeanderAmplitude = s.MeanderAmp,
-                        RiverMeanderFrequency = s.MeanderFreq,
-                        RiverNoiseInfluence = s.NoiseInfluence,
-                        // Передаем новый параметр тайлинга
-                        TextureTiling = s.TextureScale > 0.0001f ? s.TextureScale : 0.05f
-                    };
-                }
+                var visBuf = em.GetBuffer<TerrainVisualData>(entity);
+                if (visBuf.Length != Levels.Length) visBuf.ResizeUninitialized(Levels.Length);
+                for(int i=0; i < Levels.Length; i++) visBuf[i] = ConvertToVisual(Levels[i]);
             }
         }
+        
+        // --- HELPERS ---
 
-        private void ResizeArray<T>(ref T[] array, int newSize, T defaultVal)
+        private MapSettings CreateMapSettingsStruct()
         {
-            var newArray = new T[newSize];
-            for (var i = 0; i < Mathf.Min(array.Length, newSize); i++) newArray[i] = array[i];
-            if (newSize > array.Length)
-                for (var i = array.Length; i < newSize; i++)
-                    newArray[i] = defaultVal;
-            array = newArray;
+            return new MapSettings
+            {
+                Seed = Seed, MapSize = MapSize, 
+                LevelsCount = Levels != null ? Levels.Length : 0,
+                TerrainHeightScale = TerrainHeightScale,
+                UseCache = UseCache,
+                UseAutoLOD = UseAutoLOD,
+
+                // Toggles
+                ShowDebugWireframe = ShowWireframe,
+                ShowRivers = ShowRivers,
+                ShowRiverGizmos = ShowRiverGizmos,
+                ShowSettlements = ShowSettlements,
+
+                // Configs
+                Climate = new ClimateConfig {
+                    BaseTemperature = BaseTemperature,
+                    TemperatureLapseRate = TempHeightImpact,
+                    BaseMoisture = BaseMoisture,
+                    MoistureNoiseFreq = 0.01f
+                },
+                Hydrology = new HydrologyConfig { 
+                    RainIntensity = RainIntensity,
+                    RiverFluxThreshold = RiverFluxThreshold, 
+                    MoistureInfluence = 1.0f
+                },
+                Civilization = new CivilizationConfig {
+                    GlobalPopScalar = GlobalPopScalar,
+                    MinPopOutpost = MinPopOutpost,
+                    MinPopTown = MinPopTown,
+                    MinPopMetropolis = MinPopMetropolis,
+                    MetroExclusionRadius = 150f, TownExclusionRadius = 80f,
+                    MinSuitability = MinSiteQuality,
+                    TownSpawnChance = TownSpawnChance,
+                    OutpostSpawnChance = OutpostSpawnChance
+                },
+
+                // Masks
+                DebugLevelMask = CalculateMask(DebugLevels),
+                RenderLevelMask = UseAutoLOD ? 0 : CalculateMask(RenderLevels), 
+                RiverRenderMask = UseAutoLOD ? 0 : CalculateMask(RiverRenderLevels),
+                RiverDebugMask = CalculateMask(RiverDebugLevels), 
+                
+                DebugLayerColors = new FixedList128Bytes<float4>(),
+                BiomeColors = new FixedList512Bytes<BiomeColorEntry>()
+            };
         }
 
-        private int CalculateMask(bool[] levels)
+        private LevelSettings ConvertToLogic(MapLevelProfile p)
         {
-            var mask = 0;
-            if (levels == null) return mask;
-            for (var i = 0; i < levels.Length; i++)
-                if (levels[i])
-                    mask |= 1 << i;
-            return mask;
+            return new LevelSettings
+            {
+                MinSiteCount = p.MinSites,
+                MaxSiteCount = p.MaxSites,
+                ScaleFactor = p.ScaleFactor,
+                RelaxationIterations = p.RelaxationIterations,
+                EmptyCellChance = p.EmptyCellChance,
+                LODThreshold = p.LODThreshold,
+                RenderThreshold = p.RenderThreshold,
+                GenerateRoads = p.GenerateRoads ? 1 : 0, 
+                ValueBias = 0, ValueScale = 1, VisualInset = 0.3f, VisualSmoothing = 1
+            };
+        }
+
+        private TerrainVisualData ConvertToVisual(MapLevelProfile p)
+        {
+            return new TerrainVisualData
+            {
+                Style = p.Style, HeightScale = p.HeightScale, BottomDepth = p.BottomDepth,
+                TopNoiseAmplitude = p.TopSurfaceNoise, TextureTiling = p.TextureScale,
+                StrataCount = p.RockLayers, StrataInset = p.LayerInset, StrataJitter = 0.1f,
+                RiverWidthScale = p.RiverWidthMultiplier, RiverMeanderAmplitude = p.MeanderAmplitude,
+                RiverMeanderFrequency = 0.02f, RiverNoiseInfluence = 1.0f
+            };
+        }
+
+        public void ResetVisualization()
+        {
+            var world = World.DefaultGameObjectInjectionWorld; 
+            if (world != null) {
+                world.GetExistingSystemManaged<VoronoiMeshCreateSystem>()?.CleanupResources(true);
+                world.GetExistingSystemManaged<RiverRenderingSystem>()?.CleanupResources(true);
+            }
+        }
+        
+        private void ResizeArray<T>(ref T[] array, int newSize, T defaultVal) {
+             if (array == null) array = new T[0];
+             var newArray = new T[newSize];
+             for(int i=0;i<Mathf.Min(array.Length,newSize);i++) newArray[i]=array[i];
+             if(newSize>array.Length) for(int i=array.Length;i<newSize;i++) newArray[i]=defaultVal;
+             array = newArray;
+        }
+        private int CalculateMask(bool[] levels) {
+             var m=0; if(levels==null)return m; for(int i=0;i<levels.Length;i++) if(levels[i]) m|=1<<i; return m;
+        }
+        private void AddBiomeColors(ref MapSettings s) {
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Ocean, color = new float4(0.1f, 0.3f, 0.8f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Coast, color = new float4(0.9f, 0.8f, 0.6f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Ice, color = new float4(0.8f, 0.9f, 1.0f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Desert, color = new float4(0.9f, 0.8f, 0.5f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Grassland, color = new float4(0.3f, 0.7f, 0.2f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Forest, color = new float4(0.1f, 0.5f, 0.1f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Mountain, color = new float4(0.5f, 0.4f, 0.3f, 1) });
+             s.BiomeColors.Add(new BiomeColorEntry { biomeType = BiomeType.Snow, color = new float4(0.95f, 0.95f, 0.95f, 1) });
         }
     }
 }

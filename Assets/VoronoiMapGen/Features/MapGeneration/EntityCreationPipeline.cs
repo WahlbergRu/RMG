@@ -5,6 +5,7 @@ using Unity.Transforms;
 using VoronoiMapGen.Components;
 using VoronoiMapGen.Features.Data;
 using VoronoiMapGen.Features.MapGeneration.Components;
+using VoronoiMapGen.Features.Civilization.Components; // Для SettlementData
 using VoronoiMapGen.Utils;
 
 namespace VoronoiMapGen.Features
@@ -39,7 +40,7 @@ namespace VoronoiMapGen.Features
                 }
             }
 
-            // Карта родителей (Index -> Entity)
+            // Карта родителей (Index -> Entity) для связывания
             NativeParallelHashMap<int, Entity> parentIndexToEntity = default;
             if (level > 0)
             {
@@ -57,32 +58,37 @@ namespace VoronoiMapGen.Features
             }
 
             // ------------------------------------------------------------
-            // 2. BATCH CREATION (МАССОВОЕ СОЗДАНИЕ ЯЧЕЕК)
+            // 2. АРХЕТИП СУЩНОСТИ ЯЧЕЙКИ
             // ------------------------------------------------------------
-
+            // Здесь мы добавляем ВСЕ компоненты, включая новые (Civilization & Zoning)
             EntityArchetype cellArchetype = em.CreateArchetype(
+                // База
                 typeof(VoronoiCell), typeof(VoronoiSite), typeof(DetailLevelData),
                 typeof(LocalTransform), typeof(LocalToWorld),
                 typeof(CellPolygonVertex), typeof(CellTriIndex),
+                // Природа
                 typeof(TectonicPlateData), typeof(ClimateData), typeof(BiomeData),
-                typeof(CellBiome), typeof(HydrologyData), typeof(CellNeighbor)
+                typeof(CellBiome), typeof(HydrologyData), typeof(CellNeighbor),
+                
+                // --- ЦИВИЛИЗАЦИЯ И НАСЕЛЕНИЕ (L2+) ---
+                typeof(DemographicsData),
+                typeof(SettlementData),
+                typeof(CalcDemographicsTag), // Тэг для пересчета демографии
+                
+                // --- ЗОНИРОВАНИЕ РАЙОНОВ (L3+) ---
+                typeof(DistrictData) 
             );
 
-            // Создаем ВСЕ сущности разом (1 Structural Change вместо 50,000)
+            // Создаем ВСЕ сущности разом
             NativeArray<Entity> createdEntities = em.CreateEntity(cellArchetype, count, Allocator.Temp);
 
-            // Кэш для ребер, чтобы они знали свои Entity
-            // Используем NativeArray, так как индексы совпадают с data.Cells
+            // Кэш для ребер
             NativeArray<Entity> entityLookup = new NativeArray<Entity>(count, Allocator.Temp);
             createdEntities.CopyTo(entityLookup);
 
             // ------------------------------------------------------------
-            // 3. ЗАПОЛНЕНИЕ ДАННЫМИ (В цикле)
+            // 3. ЗАПОЛНЕНИЕ ДАННЫМИ
             // ------------------------------------------------------------
-            // Теперь просто пробегаем и устанавливаем значения.
-            // Примечание: Для экстремальной оптимизации это можно вынести в IJobParallelFor
-            // (используя EntityCommandBuffer.Parallel), но даже в MainThread это будет очень быстро.
-
             for (int i = 0; i < count; i++)
             {
                 Entity e = createdEntities[i];
@@ -110,7 +116,44 @@ namespace VoronoiMapGen.Features
                 em.SetComponentData(e, data.Hydrology[i]);
                 em.SetComponentData(e, data.Biomes[i]);
 
-                // CellBiome (для рендера)
+                // --- ЗАПОЛНЕНИЕ НОВЫХ ДАННЫХ ---
+
+                // 1. Поселения (Settlements)
+                if (data.Settlements.IsCreated)
+                {
+                    em.SetComponentData(e, data.Settlements[i]);
+                }
+                else
+                {
+                    // Если данных нет (например на L0), ставим дефолт
+                    em.SetComponentData(e, new SettlementData 
+                    { 
+                        Type = SettlementType.Wilderness, 
+                        MetropolisIndex = -1 
+                    });
+                }
+
+                // 2. Районы (Districts)
+                if (data.Districts.IsCreated)
+                {
+                    em.SetComponentData(e, data.Districts[i]);
+                }
+                else
+                {
+                    // Если данных нет (например на L2 или в лесу), это просто "Парк" без застройки
+                    em.SetComponentData(e, new DistrictData 
+                    { 
+                        Type = DistrictType.Park, 
+                        BuildingDensity = 0 
+                    });
+                }
+
+                // 3. Демография (пустая при создании, заполнится системой симуляции)
+                em.SetComponentData(e, new DemographicsData());
+
+                // ------------------------------
+
+                // CellBiome (для рендера цвета)
                 em.SetComponentData(e, new CellBiome
                 {
                     Type = data.Biomes[i].Type,
@@ -129,7 +172,7 @@ namespace VoronoiMapGen.Features
             }
 
             // ------------------------------------------------------------
-            // 4. СОЗДАНИЕ РЕБЕР (ТОЖЕ BATCH)
+            // 4. СОЗДАНИЕ РЕБЕР
             // ------------------------------------------------------------
             if (edges.Length > 0) CreateEdgeEntitiesBatch(em, level, edges, entityLookup);
 
@@ -146,43 +189,29 @@ namespace VoronoiMapGen.Features
             NativeList<VoronoiEdge> edges,
             NativeArray<Entity> cellLookup)
         {
-            // Фильтруем ребра, у которых есть длина
             NativeList<VoronoiEdge> validEdges = new NativeList<VoronoiEdge>(edges.Length, Allocator.Temp);
 
             for (int i = 0; i < edges.Length; i++)
             {
                 VoronoiEdge edge = edges[i];
                 if (math.lengthsq(edge.VertexA) > 0.001f)
-                    // Проверяем валидность индексов сразу
                     if (edge.SiteA >= 0 && edge.SiteA < cellLookup.Length &&
                         (edge.SiteB == -1 || (edge.SiteB >= 0 && edge.SiteB < cellLookup.Length)))
                         validEdges.Add(edge);
             }
 
-            if (validEdges.Length == 0)
-            {
-                validEdges.Dispose();
-                return;
-            }
+            if (validEdges.Length == 0) { validEdges.Dispose(); return; }
 
-            // Пакетное создание сущностей ребер
-            EntityArchetype edgeArchetype = em.CreateArchetype(
-                typeof(VoronoiEdge),
-                typeof(DetailLevelData),
-                typeof(LocalToWorld)
-            );
-
-            // Если уровень высокий - это дороги, добавляем тег
+            // Если уровень L3 и выше - это уже могут быть городские дороги
+            // Но логику дорог пока оставляем простой: Border или Road tag
+            EntityArchetype edgeArchetype;
             if (level >= 4)
-                edgeArchetype = em.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld),
-                    typeof(RoadEntityTag));
+                edgeArchetype = em.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld), typeof(RoadEntityTag));
             else
-                edgeArchetype = em.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld),
-                    typeof(BorderEntityTag));
+                edgeArchetype = em.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld), typeof(BorderEntityTag));
 
             NativeArray<Entity> edgeEntities = em.CreateEntity(edgeArchetype, validEdges.Length, Allocator.Temp);
 
-            // Заполнение данных
             for (int i = 0; i < validEdges.Length; i++)
             {
                 VoronoiEdge edge = validEdges[i];

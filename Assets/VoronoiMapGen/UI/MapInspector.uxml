@@ -1,0 +1,41 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <ui:VisualElement name="Container" style="
+        position: absolute; 
+        top: 80px; 
+        left: 20px; 
+        width: 280px; 
+        
+        background-color: rgba(26, 31, 38, 0.95); 
+        
+        border-width: 1px;
+        border-radius: 8px;
+        border-top-color: rgba(255, 255, 255, 0.1);
+        border-left-color: rgba(255, 255, 255, 0.1);
+        border-right-color: rgba(0, 0, 0, 0.5);
+        border-bottom-color: rgba(0, 0, 0, 0.5);
+        
+        padding: 12px 16px;
+    ">
+        <!-- Заголовок -->
+        <ui:Label name="InfoTitle" text="SCANNING..." style="
+            color: rgb(230, 230, 230);
+            font-size: 18px;
+            -unity-font-style: bold;
+            margin-bottom: 4px;
+        " />
+
+        <!-- Разделительная линия -->
+        <ui:VisualElement style="
+            height: 1px;
+            background-color: rgba(255, 255, 255, 0.2);
+            margin-bottom: 8px;
+        " />
+
+        <!-- Основной текст -->
+        <ui:Label name="InfoBody" text="Move cursor over map..." style="
+            color: rgb(180, 180, 180);
+            font-size: 13px;
+            white-space: normal;
+        " />
+    </ui:VisualElement>
+</ui:UXML>

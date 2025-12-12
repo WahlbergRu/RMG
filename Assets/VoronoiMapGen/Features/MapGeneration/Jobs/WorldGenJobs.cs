@@ -1,7 +1,11 @@
-﻿using Unity.Burst;
+﻿// ============================================================
+// FILE: Assets\VoronoiMapGen\Features\MapGeneration\Jobs\WorldGenJobs.cs
+// ============================================================
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using VoronoiMapGen.Components; // Для доступа к MapSettings и конфигам
 using VoronoiMapGen.Features.MapGeneration.Components;
 
 namespace VoronoiMapGen.Features.MapGeneration
@@ -23,11 +27,9 @@ namespace VoronoiMapGen.Features.MapGeneration
         public void Execute(int i)
         {
             float2 pos = Sites[i];
-
             float baseHeight = 0;
             bool isOcean = false;
 
-            // --- L0 (GLOBAL) ---
             if (Level == 0)
             {
                 float2 center = MapSize * 0.5f;
@@ -35,104 +37,54 @@ namespace VoronoiMapGen.Features.MapGeneration
                 float maxRadius = math.min(MapSize.x, MapSize.y) * 0.45f;
                 float distPercent = math.clamp(dist / maxRadius, 0f, 1f);
 
-                // 1. Форма острова (Купол)
-                // Делаем купол чуть выше, чтобы был запас для гор
                 float islandShape = (1.0f - math.pow(distPercent, 1.5f)) * 1.5f - 0.3f;
-
-                // 2. Базовый ландшафт (Низкочастотные холмы)
                 float baseNoise = noise.snoise(pos * 0.0004f + new float2(Seed * 0.1f));
-
-                // 3. --- ГОРЫ (Ridged Noise) ---
-                // Создаем острые пики. "1 - abs(noise)" делает острые верхушки.
+                
                 float mountainFreq = 0.0012f;
                 float mountainRaw = noise.snoise(pos * mountainFreq + new float2(Seed * 0.5f));
-                float ridgedMountains = 1.0f - math.abs(mountainRaw); // Острые гребни
-                ridgedMountains = math.pow(ridgedMountains, 2.5f); // Делаем пики более выраженными
+                float ridgedMountains = 1.0f - math.abs(mountainRaw); 
+                ridgedMountains = math.pow(ridgedMountains, 2.5f);
 
-                // Добавляем горы только ближе к центру (где islandShape высокий)
-                // smoothstep(0.2, 0.8, ...) означает, что горы растут, начиная с 20% высоты острова.
                 float mountainMask = math.smoothstep(0.2f, 0.8f, islandShape);
-
-                // Складываем базу и горы.
-                // 0.6f силы гор + 0.3f базового шума + форма острова
                 baseHeight = islandShape + baseNoise * 0.3f + ridgedMountains * 0.9f * mountainMask;
 
-                // 4. --- ЭРОЗИЯ / ПРОЛИВЫ (Carving) ---
-
-                // Шум для каньонов
                 float valleyFreq = 0.002f;
                 float valleyRaw = noise.snoise(pos * valleyFreq + new float2(Seed * 0.9f));
                 float valleyFactor = 1.0f - math.abs(valleyRaw);
-                valleyFactor = math.pow(valleyFactor, 4.0f); // Узкие глубокие ущелья
-
-                // Режем только там, где уже высоко (чтобы не дырявить берега)
+                valleyFactor = math.pow(valleyFactor, 4.0f);
                 float carveMask = math.smoothstep(0.1f, 0.6f, baseHeight);
-                float carveStrength = 0.7f; // Глубокий разрез
-
-                if (baseHeight > 0.05f)
-                    // Вычитаем каньон.
-                    // Т.к. мы подняли горы (в шаге 3), теперь вычитание не убьет их полностью,
-                    // а просто создаст разрыв между двумя высокими пиками.
-                    baseHeight -= valleyFactor * carveStrength * carveMask;
-
-                // 5. Обработка берегов и океана
+                float carveStrength = 0.7f;
+                
+                if (baseHeight > 0.05f) baseHeight -= valleyFactor * carveStrength * carveMask;
                 if (distPercent < 0.7f && baseNoise < -0.2f) baseHeight *= 0.8f;
-
-                // Океан
                 isOcean = baseHeight < 0.08f;
             }
-            // --- L1+ (CHILDREN) ---
             else
             {
                 int parentIdx = SiteMeta[i].ParentIndex;
-
                 if (ParentTectonics.Length > 0 && parentIdx >= 0 && parentIdx < ParentTectonics.Length)
                 {
                     TectonicPlateData parentData = ParentTectonics[parentIdx];
-
-                    if (parentData.IsOcean)
-                    {
-                        isOcean = true;
-                        baseHeight = -0.5f;
-                    }
-                    else
-                    {
-                        // Детализация
+                    if (parentData.IsOcean) { isOcean = true; baseHeight = -0.5f; }
+                    else {
                         float freq = 0.002f * math.pow(3.0f, Level);
                         float detail = noise.snoise(pos * freq + new float2(Seed * 0.3f));
-                        float amp = 0.2f / Level; // Чуть больше деталей
-
-                        // Локальная эрозия (мелкие овраги на склонах)
+                        float amp = 0.2f / Level;
                         float localValley = 1.0f - math.abs(noise.snoise(pos * (freq * 1.5f) + new float2(Seed * 0.8f)));
                         localValley = math.pow(localValley, 3.0f) * (0.25f / Level);
 
-                        // Наследуем высоту родителя + детали
                         baseHeight = parentData.BaseHeight + detail * amp - localValley;
-
-                        // Фьорды / Горные озера
-                        if (baseHeight < 0.05f)
-                        {
-                            // Если родитель был очень высоким (>0.4), это глубокое ущелье (озеро), а не море
-                            if (parentData.BaseHeight > 0.4f)
-                            {
+                        if (baseHeight < 0.05f) {
+                            if (parentData.BaseHeight > 0.4f) {
                                 if (baseHeight < 0.01f) baseHeight = 0.01f;
-                            }
-                            else
-                            {
+                            } else {
                                 isOcean = baseHeight <= 0.001f;
                             }
-                        }
-                        else
-                        {
+                        } else {
                             isOcean = false;
                         }
                     }
-                }
-                else
-                {
-                    baseHeight = 0;
-                    isOcean = true;
-                }
+                } else { baseHeight = 0; isOcean = true; }
             }
 
             TectonicData[i] = new TectonicPlateData
@@ -152,6 +104,9 @@ namespace VoronoiMapGen.Features.MapGeneration
         public int Seed;
         public float2 MapSize;
         public int Level;
+        
+        // Передаем КОНФИГУРАЦИЮ
+        public ClimateConfig Config; 
 
         [ReadOnly] public NativeArray<float2> Sites;
         [ReadOnly] public NativeArray<VoronoiSite> SiteMeta;
@@ -167,8 +122,9 @@ namespace VoronoiMapGen.Features.MapGeneration
             TectonicPlateData plate = Tectonics[i];
             float height = plate.BaseHeight;
 
-            float temp = 0.5f;
-            float moisture = 0.5f;
+            // Используем значения из CONFIG
+            float temp = Config.BaseTemperature;
+            float moisture = Config.BaseMoisture;
 
             if (Level > 0 && ParentClimate.Length > 0)
             {
@@ -183,22 +139,20 @@ namespace VoronoiMapGen.Features.MapGeneration
             else
             {
                 float latitude = pos.y / MapSize.y;
-                temp = 1.0f - math.abs(latitude - 0.5f) * 2.0f;
-                if (height > 0.4f) temp -= (height - 0.4f) * 0.9f; // Температура сильнее падает с высотой
+                temp = Config.BaseTemperature + (0.5f - math.abs(latitude - 0.5f)); 
 
-                moisture = 0.5f;
-                // Горы задерживают влагу (орографический эффект - упрощенно)
-                // Сделаем вершины суше (снег), подножья влажнее (лес)
+                // Cooling with height (Lapse Rate from config)
+                if (height > 0.4f) temp -= (height - 0.4f) * Config.TemperatureLapseRate; 
+
+                // Moisture calculation
+                moisture = Config.BaseMoisture;
+                // Mountains effect
                 if (height > 0.3f && height < 0.8f) moisture += 0.3f;
-
-                moisture += noise.snoise(pos * 0.0005f + new float2(Seed * 0.2f)) * 0.2f;
+                // Noise variation from config freq
+                moisture += noise.snoise(pos * Config.MoistureNoiseFreq + new float2(Seed * 0.2f)) * 0.2f;
             }
 
-            if (plate.IsOcean)
-            {
-                moisture = 1.0f;
-                temp = 0.5f;
-            }
+            if (plate.IsOcean) { moisture = 1.0f; temp = math.max(temp, 0.4f); } // Океан аккумулирует тепло
 
             temp = math.clamp(temp, 0, 1);
             moisture = math.clamp(moisture, 0, 1);
@@ -216,10 +170,8 @@ namespace VoronoiMapGen.Features.MapGeneration
             if (isOcean) return BiomeType.Ocean;
             if (height < 0.07f) return BiomeType.Coast;
 
-            // Снежные шапки - теперь строго по высоте и температуре
-            // Поскольку горы стали выше (до 1.5), порог 0.9 обеспечит снег только на пиках
             if (height > 0.9f) return BiomeType.Snow;
-            if (height > 0.6f) return BiomeType.Mountain; // Скалы
+            if (height > 0.6f) return BiomeType.Mountain; 
 
             if (temp < 0.25f) return BiomeType.Ice;
 

@@ -1,8 +1,12 @@
-﻿using System.Collections.Generic;
+﻿// ============================================================
+// FILE: Assets\VoronoiMapGen\Features\MapGeneration\Jobs\HydrologyJobs.cs
+// ============================================================
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using VoronoiMapGen.Components; // HydrologyConfig definition
 using VoronoiMapGen.Features.MapGeneration.Components;
 
 namespace VoronoiMapGen.Features.MapGeneration.Jobs
@@ -14,6 +18,9 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
         [ReadOnly] public NativeArray<TectonicPlateData> Tectonics;
         [ReadOnly] public NativeArray<ClimateData> Climate;
         [ReadOnly] public NativeParallelMultiHashMap<int, NeighborInfo> NeighborsMap;
+        
+        // Config injected
+        public HydrologyConfig Config;
 
         public NativeArray<HydrologyData> Hydrology;
 
@@ -33,16 +40,13 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                     continue;
                 }
 
-                // Базовый поток от осадков
-                float initialFlux = climate.Moisture * 0.5f;
-                if (tectonic.BaseHeight > 0.8f && climate.Temperature < 0.35f) initialFlux += 2.0f; // Ледник
-                if (tectonic.BaseHeight < 0.3f && climate.Moisture > 0.7f) initialFlux += 1.0f; // Болото
+                // Flux based on Rain Intensity config
+                float initialFlux = climate.Moisture * Config.RainIntensity; 
+                if (tectonic.BaseHeight > 0.8f && climate.Temperature < 0.35f) initialFlux += 2.0f; 
+                if (tectonic.BaseHeight < 0.3f && climate.Moisture > 0.7f) initialFlux += 1.0f;
 
-                // --- 1. Поиск строгого спуска (Downhill) ---
                 int bestNeighbor = -1;
                 float maxSlope = -1.0f;
-
-                // Переменные для запасного плана (Spillover)
                 int lowestNeighborIndex = -1;
                 float lowestNeighborHeight = float.MaxValue;
 
@@ -50,40 +54,23 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                     do
                     {
                         if (nInfo.Index >= count) continue;
-
                         float nHeight = Tectonics[nInfo.Index].BaseHeight;
                         if (Tectonics[nInfo.Index].IsOcean) nHeight = 0;
 
-                        // Поиск обычного спуска
                         if (nHeight < tectonic.BaseHeight)
                         {
                             float drop = tectonic.BaseHeight - nHeight;
                             float slope = drop / math.max(0.1f, nInfo.Distance);
-
-                            if (slope > maxSlope)
-                            {
-                                maxSlope = slope;
-                                bestNeighbor = nInfo.Index;
-                            }
+                            if (slope > maxSlope) { maxSlope = slope; bestNeighbor = nInfo.Index; }
                         }
+                        if (nHeight < lowestNeighborHeight) { lowestNeighborHeight = nHeight; lowestNeighborIndex = nInfo.Index; }
 
-                        // Поиск самого низкого соседа (на случай ямы)
-                        if (nHeight < lowestNeighborHeight)
-                        {
-                            lowestNeighborHeight = nHeight;
-                            lowestNeighborIndex = nInfo.Index;
-                        }
                     } while (NeighborsMap.TryGetNextValue(out nInfo, ref it));
 
                 bool isStuck = bestNeighbor == -1;
-
-                // --- 2. Логика Перелива (Spillover) ---
-                // Если мы застряли (нет спуска), но у нас есть соседи — течем в самого низкого из них.
-                // Это симулирует наполнение озера и перелив через край.
                 if (isStuck && lowestNeighborIndex != -1)
                 {
                     bestNeighbor = lowestNeighborIndex;
-                    // Уклон считаем нулевым или отрицательным, это "озерный" поток
                     maxSlope = 0;
                 }
 
@@ -92,19 +79,13 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                     FlowTargetIndex = bestNeighbor,
                     Flux = initialFlux,
                     IsOcean = false,
-                    IsLake = isStuck, // Флаг, что здесь была яма
+                    IsLake = isStuck, 
                     LocalSlope = maxSlope,
                     Type = RiverMorphology.Meandering
                 };
             }
 
-            // --- ЭТАП 2: НАКОПЛЕНИЕ ВОДЫ (FLUX) ---
-
-            // Сортируем ячейки по высоте, чтобы вода текла сверху вниз.
-            // Примечание: Spillover (течение вверх) ломает идеальную сортировку, 
-            // поэтому вода в озерах может не накопить полный объем за один проход, 
-            // но для визуализации связности этого достаточно.
-
+            // --- ЭТАП 2: НАКОПЛЕНИЕ ВОДЫ ---
             NativeArray<int> sortedIndices = new NativeArray<int>(count, Allocator.Temp);
             for (int i = 0; i < count; i++) sortedIndices[i] = i;
             sortedIndices.Sort(new HeightComparer { Tectonics = Tectonics });
@@ -116,37 +97,22 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                 if (hSource.IsOcean) continue;
 
                 int targetIdx = hSource.FlowTargetIndex;
-
-                // --- ЗАЩИТА ОТ ЦИКЛОВ (Ping-Pong) ---
-                // Если ячейка А течет в Б, а Б течет в А — это бесконечный цикл.
-                // Просто не передаем flux, чтобы не было переполнения, но связь оставляем.
                 if (targetIdx != -1)
                 {
                     HydrologyData hTarget = Hydrology[targetIdx];
-                    if (hTarget.FlowTargetIndex == i)
-                        // Обнаружен цикл с соседом! Прерываем накопление Flux, но оставляем геометрию.
-                        continue;
+                    if (hTarget.FlowTargetIndex == i) continue;
 
                     if (!hTarget.IsOcean)
                     {
                         hTarget.Flux += hSource.Flux;
-
-                        // Определяем тип русла
                         hTarget.StreamPower = hTarget.Flux * hTarget.LocalSlope;
-
                         if (hTarget.LocalSlope > 0.08f) hTarget.Type = RiverMorphology.MountainStream;
                         else hTarget.Type = RiverMorphology.Meandering;
-
                         Hydrology[targetIdx] = hTarget;
                     }
                     else
                     {
-                        // Впадение в море
-                        if (hSource.Flux > 20f)
-                        {
-                            hSource.Type = RiverMorphology.Delta;
-                            Hydrology[i] = hSource;
-                        }
+                        if (hSource.Flux > 20f) { hSource.Type = RiverMorphology.Delta; Hydrology[i] = hSource; }
                     }
                 }
             }
@@ -157,24 +123,18 @@ namespace VoronoiMapGen.Features.MapGeneration.Jobs
                 HydrologyData h = Hydrology[i];
                 if (!h.IsOcean)
                 {
-                    // ПОРОГ РЕКИ
-                    // Можно уменьшить до 1.0f или 0.5f, чтобы видеть больше мелких рек
-                    if (h.Flux > 1.0f) h.IsRiver = true;
+                    // ИСПОЛЬЗУЕМ КОНФИГ ПРИ РЕШЕНИИ "ЯВЛЯЕТСЯ ЛИ РЕКОЙ"
+                    if (h.Flux > Config.RiverFluxThreshold) h.IsRiver = true;
                     Hydrology[i] = h;
                 }
             }
-
             sortedIndices.Dispose();
         }
 
         private struct HeightComparer : IComparer<int>
         {
             [ReadOnly] public NativeArray<TectonicPlateData> Tectonics;
-
-            public int Compare(int x, int y)
-            {
-                return Tectonics[y].BaseHeight.CompareTo(Tectonics[x].BaseHeight);
-            }
+            public int Compare(int x, int y) { return Tectonics[y].BaseHeight.CompareTo(Tectonics[x].BaseHeight); }
         }
     }
 }
