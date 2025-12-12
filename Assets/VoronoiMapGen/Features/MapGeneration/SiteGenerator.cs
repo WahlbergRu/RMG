@@ -3,13 +3,13 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using VoronoiMapGen.Components;
-using VoronoiMapGen.Features.MapGeneration.Components;
+using VoronoiMapGen.Features.MapGeneration.Components; 
+using VoronoiMapGen.Features.Civilization.Components;
 
 namespace VoronoiMapGen.Features.MapGeneration
 {
     public static class SiteGenerator
     {
-        // Обновленная сигнатура: 8 аргументов (убрали levelSettingsNative и parentSites)
         public static (NativeArray<float2> sites, NativeArray<VoronoiSite> siteMetadata) Generate(
             MapSettings settings,
             LevelSettings currentLevelSettings,
@@ -18,7 +18,9 @@ namespace VoronoiMapGen.Features.MapGeneration
             NativeArray<VoronoiSite> pMeta,
             NativeArray<HydrologyData> pHydro,
             NativeArray<TectonicPlateData> pTect,
-            NativeArray<ClimateData> pClim
+            NativeArray<ClimateData> pClim,
+            // Добавлен массив данных о поселениях
+            NativeArray<SettlementData> pSettlements
         )
         {
             int totalCount;
@@ -36,8 +38,7 @@ namespace VoronoiMapGen.Features.MapGeneration
             NativeArray<VoronoiSite> meta = new NativeArray<VoronoiSite>(totalCount, Allocator.Persistent);
 
             // Инициализация -1
-            InitializeArraysJob initJob = new InitializeArraysJob { Sites = sites, Meta = meta };
-            initJob.Schedule(totalCount, 64).Complete();
+            new InitializeArraysJob { Sites = sites, Meta = meta }.Schedule(totalCount, 64).Complete();
 
             // Создаем безопасные алиасы для джобы (Unity Jobs требуют валидные массивы)
             NativeArray<VoronoiCell> safeCells = CreateSafeAlias(pCells, out bool disposeCells);
@@ -45,6 +46,8 @@ namespace VoronoiMapGen.Features.MapGeneration
             NativeArray<HydrologyData> safeHydro = CreateSafeAlias(pHydro, out bool disposeHydro);
             NativeArray<TectonicPlateData> safeTect = CreateSafeAlias(pTect, out bool disposeTect);
             NativeArray<ClimateData> safeClim = CreateSafeAlias(pClim, out bool disposeClim);
+            // Создаем алиас для поселений
+            NativeArray<SettlementData> safeSett = CreateSafeAlias(pSettlements, out bool disposeSett);
 
             try
             {
@@ -60,6 +63,8 @@ namespace VoronoiMapGen.Features.MapGeneration
                     ParentHydrology = safeHydro,
                     ParentTectonics = safeTect,
                     ParentClimate = safeClim,
+                    // Передаем массив в джобу
+                    ParentSettlements = safeSett,
 
                     Sites = sites,
                     SiteMetadata = meta
@@ -72,6 +77,8 @@ namespace VoronoiMapGen.Features.MapGeneration
                 if (disposeHydro) safeHydro.Dispose();
                 if (disposeTect) safeTect.Dispose();
                 if (disposeClim) safeClim.Dispose();
+                // Не забываем очистить
+                if (disposeSett) safeSett.Dispose();
             }
 
             return (sites, meta);
@@ -103,7 +110,6 @@ namespace VoronoiMapGen.Features.MapGeneration
         }
     }
 
-    // --- ВОТ ОПРЕДЕЛЕНИЕ ДЖОБЫ, КОТОРОЕ БЫЛО ПОТЕРЯНО ---
     [BurstCompile]
     public struct GenerateSitesJob : IJob
     {
@@ -117,6 +123,8 @@ namespace VoronoiMapGen.Features.MapGeneration
         [ReadOnly] public NativeArray<HydrologyData> ParentHydrology;
         [ReadOnly] public NativeArray<TectonicPlateData> ParentTectonics;
         [ReadOnly] public NativeArray<ClimateData> ParentClimate;
+        // Читаем поселения из предыдущего уровня
+        [ReadOnly] public NativeArray<SettlementData> ParentSettlements;
 
         public NativeArray<float2> Sites;
         public NativeArray<VoronoiSite> SiteMetadata;
@@ -136,7 +144,7 @@ namespace VoronoiMapGen.Features.MapGeneration
                 for (int i = 0; i < count; i++)
                 {
                     if (index >= Sites.Length) break;
-                    // Для глобального уровня ищем по всей карте (0,0) -> MapSize
+                    // Для глобального уровня ищем по всей карте
                     float2 pos = GetBestCandidate(ref rng, localPoints, float2.zero, MapSize, 10, true);
                     localPoints.Add(pos);
                     AddSite(index++, pos, -1, 0.5f);
@@ -155,48 +163,107 @@ namespace VoronoiMapGen.Features.MapGeneration
                     if (index >= Sites.Length) break;
 
                     VoronoiCell pCell = ParentCells[p];
+                    
+                    // Валидация индексов родителей
                     if (pCell.SiteIndex >= ParentMeta.Length) continue;
-                    VoronoiSite pMeta = ParentMeta[pCell.SiteIndex];
+                    
                     // Пропускаем "призраков"
-                    if (pMeta.Value < -0.5f) continue;
+                    if (ParentMeta[pCell.SiteIndex].Value < -0.5f) continue;
 
-                    // Расчет пригодности (Suitability) для спавна детей
+                    int targetCount = 0;
                     float suitability = 0.5f;
-                    if (ParentHydrology.Length > pCell.SiteIndex)
-                    {
-                        HydrologyData hydro = ParentHydrology[pCell.SiteIndex];
-                        TectonicPlateData tect = ParentTectonics[pCell.SiteIndex];
-                        ClimateData clim = ParentClimate[pCell.SiteIndex];
 
-                        if (hydro.IsOcean || tect.IsOcean)
+                    // 1. ПРИОРИТЕТ: Используем логику Цивилизации (если данные есть)
+                    // Обычно эти данные появляются на переходе L2 -> L3
+                    if (ParentSettlements.IsCreated && pCell.SiteIndex < ParentSettlements.Length)
+                    {
+                        var setType = ParentSettlements[pCell.SiteIndex].Type;
+                        
+                        // Логика количества детей в зависимости от типа поселения
+                        switch (setType)
                         {
-                            suitability = 0.0f; // В океане меньше детализация
-                        }
-                        else
-                        {
-                            if (hydro.IsRiver) suitability += 0.3f;
-                            if (hydro.IsLake) suitability += 0.2f;
-                            float tempComfort = 1.0f - math.abs(clim.Temperature - 0.5f) * 2;
-                            suitability += tempComfort * 0.2f;
+                            case SettlementType.Metropolis:
+                                // Столицы всегда плотно застроены: (80%..100% от максимума)
+                                targetCount = rng.NextInt((int)(Settings.MaxSiteCount * 0.8f), Settings.MaxSiteCount);
+                                suitability = 1.0f;
+                                break;
+
+                            case SettlementType.Town:
+                                // Города-спутники: (40%..60% от максимума)
+                                targetCount = rng.NextInt((int)(Settings.MaxSiteCount * 0.4f), (int)(Settings.MaxSiteCount * 0.6f));
+                                suitability = 0.7f;
+                                break;
+
+                            case SettlementType.Outpost:
+                                // Деревни маленькие (минимум 3 или лимит конфига)
+                                targetCount = math.min(3, Settings.MaxSiteCount);
+                                suitability = 0.4f;
+                                break;
+
+                            case SettlementType.Wilderness:
+                            default:
+                                // Пересчитываем suitability по природе (реки, биомы)
+                                if (ParentHydrology.Length > pCell.SiteIndex)
+                                {
+                                    var h = ParentHydrology[pCell.SiteIndex];
+                                    var t = ParentTectonics[pCell.SiteIndex];
+                                    // У воды шанс выше
+                                    if (h.IsRiver) suitability += 0.4f; 
+                                    if (h.IsLake) suitability += 0.3f;
+                                    if (h.IsOcean || t.IsOcean) suitability = 0.0f;
+                                }
+    
+                                // Используем стандартный Min/Max из настроек для этого уровня
+                                // Если Suitability высокий (0.7-1.0), будет много детей. Если низкий - мало.
+                                suitability = math.clamp(suitability, 0.0f, 1.0f);
+                                targetCount = (int)math.lerp(Settings.MinSiteCount, Settings.MaxSiteCount, suitability);
+    
+                                // Только если совсем плохое место и настройки разрешают пустые - ставим 0
+                                if (suitability < 0.1f && Settings.MinSiteCount == 0) targetCount = 0;
+                                break;
                         }
                     }
-
-                    suitability = math.clamp(suitability, 0.0f, 1.0f);
-
-                    int targetCount = (int)math.lerp(Settings.MinSiteCount, Settings.MaxSiteCount, suitability);
-                    // Минимум 1 ребенок, если не океан
-                    if (targetCount == 0 && Settings.MinSiteCount > 0) targetCount = 1;
-                    if (suitability < 0.01f && Settings.MinSiteCount == 0) targetCount = 0;
-
-                    localPoints.Clear();
-                    float2 center = pCell.Centroid;
-
-                    for (int c = 0; c < targetCount; c++)
+                    else
                     {
-                        if (index >= Sites.Length) break;
-                        float2 bestPos = GetBestCandidate(ref rng, localPoints, center, MapSize, 8, false, spawnRadius);
-                        localPoints.Add(bestPos);
-                        AddSite(index++, bestPos, pCell.SiteIndex, suitability);
+                        // 2. ФОЛЛБЭК: Старая логика (для L0->L1 или если нет цивилизации)
+                        // Смотрим на гидрологию и тектонику
+                        if (ParentHydrology.Length > pCell.SiteIndex)
+                        {
+                            var h = ParentHydrology[pCell.SiteIndex];
+                            var t = ParentTectonics[pCell.SiteIndex];
+
+                            if (h.IsRiver) suitability += 0.3f;
+                            if (h.IsLake) suitability += 0.2f;
+                            if (h.IsOcean || t.IsOcean) suitability = 0.0f;
+                        }
+                        
+                        suitability = math.clamp(suitability, 0.0f, 1.0f);
+                        targetCount = (int)math.lerp(Settings.MinSiteCount, Settings.MaxSiteCount, suitability);
+                        
+                        // Доп. фильтр: если совсем плохие условия - детей нет
+                        if (suitability < 0.01f && Settings.MinSiteCount == 0) targetCount = 0;
+                    }
+
+                    // Генерация точек для текущей родительской ячейки
+                    if (targetCount > 0)
+                    {
+                        localPoints.Clear();
+                        float2 center = pCell.Centroid;
+
+                        for (int c = 0; c < targetCount; c++)
+                        {
+                            if (index >= Sites.Length) break;
+                            
+                            // Для поселений можно уменьшать радиус, чтобы города были плотнее
+                            float r = spawnRadius; 
+                            if (suitability > 0.9f) r *= 0.8f; // Уплотняем столицы
+
+                            float2 bestPos = GetBestCandidate(ref rng, localPoints, center, MapSize, 8, false, r);
+                            localPoints.Add(bestPos);
+                            
+                            // Добавляем новый сайт
+                            AddSite(index++, bestPos, pCell.SiteIndex, suitability);
+                        }
                     }
                 }
             }

@@ -1,110 +1,123 @@
-﻿using System;
+﻿// ============================================================
+// FILE: Assets\VoronoiMapGen\_Core\Components\ConfigComponents.cs
+// ============================================================
+using System;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 using VoronoiMapGen.Features.MapGeneration.Components;
 
-// Для Color и Range
-
 namespace VoronoiMapGen.Components
 {
-    // --- Global Tectonic Configuration ---
+    // --- ТЕКТОНИКА ---
     [Serializable]
     public struct TectonicConfig
     {
-        // Island Shape
         public float IslandRadiusRatio;
         public float IslandFalloff;
         public float HeightOffset;
-
-        // Mountains
         public float MountainFreq;
         public float MountainSharpness;
         public float MountainHeight;
-
-        // Erosion (Carving)
         public float ValleyFreq;
         public float ValleyWidthPower;
         public float CarveStrength;
         public float CarveThreshold;
     }
 
-    // --- Main Map Settings Singleton ---
+    // --- ГИДРОЛОГИЯ (Обновленная) ---
+    [Serializable]
+    public struct HydrologyConfig
+    {
+        public float RainIntensity;      // Множитель осадков (для расчета Flux)
+        public float RiverFluxThreshold; // Порог превращения ручья в реку
+        public float MoistureInfluence;  // Влияние влажности климата на реки
+    }
+
+    // --- КЛИМАТ (Новая) ---
+    [Serializable]
+    public struct ClimateConfig
+    {
+        public float BaseTemperature;       // Базовая температура (0.5 = умеренно)
+        public float TemperatureLapseRate;  // Насколько холодает с высотой
+        public float BaseMoisture;          // Фоновая влажность биомов
+        public float MoistureNoiseFreq;     // Частота шума вариации влажности
+    }
+
+    // --- ЦИВИЛИЗАЦИЯ ---
+    [Serializable]
+    public struct CivilizationConfig
+    {
+        public float GlobalPopScalar; 
+        public int MinPopOutpost;
+        public int MinPopTown;
+        public int MinPopMetropolis;
+        public float MetroExclusionRadius;
+        public float TownExclusionRadius;
+        
+        public float MinSuitability;     // 0.0 - 1.0 (Отсекает плохие земли)
+        public float TownSpawnChance;    // 0.0 - 1.0 (Вероятность города-спутника)
+        public float OutpostSpawnChance; // 0.0 - 1.0 (Вероятность деревни)
+    }
+
+    // --- ГЛАВНЫЙ СИНГЛТОН НАСТРОЕК ---
     public struct MapSettings : IComponentData
     {
         public int Seed;
         public float2 MapSize;
         public int LevelsCount;
 
-        // --- Feature Toggles ---
+        // Визуализация
         public bool ShowRivers;
         public bool ShowRiverGizmos;
+        public bool ShowSettlements; 
 
-        // --- Masks ---
+        // Маски уровней
         public int RiverRenderMask;
         public int RiverDebugMask;
-
         public bool UseAutoLOD;
-
         public bool ShowDebugWireframe;
         public int DebugLevelMask;
         public int RenderLevelMask;
 
-        // --- Terrain Physics ---
         public float TerrainHeightScale;
         public bool UseCache;
 
-        // --- Logic Configs ---
+        // Вложенные конфиги
         public TectonicConfig Tectonics;
+        public HydrologyConfig Hydrology;       
+        public ClimateConfig Climate;       
+        public CivilizationConfig Civilization;
 
-        // --- Legacy Visuals (Roads & Borders) ---
-        public bool DrawBorders;
-        public bool DrawRoads;
-        public float RoadWidth;
-        public float EdgeWidth;
-        public Color BorderColor;
-        public Color RoadColor;
-
-        // --- Internal State ---
         public bool IsGenerated;
 
-        // --- Shared Colors ---
         public FixedList128Bytes<float4> DebugLayerColors;
         public FixedList512Bytes<BiomeColorEntry> BiomeColors;
     }
 
-    // --- Per-Level Logic Configuration ---
+    // --- Остальные структуры оставляем для совместимости ---
     [Serializable]
     public struct LevelSettings : IBufferElementData
     {
         public int MinSiteCount;
         public int MaxSiteCount;
-
         public int GlobalSiteCount => MaxSiteCount;
-
         public float ScaleFactor;
-        public float LODThreshold; // Порог высоты камеры для переключения
+        public float LODThreshold; 
         public float RenderThreshold;
+        public int GenerateRoads;
         public float ValueBias;
         public float ValueScale;
         public int RelaxationIterations;
         public float EmptyCellChance;
-
         [Range(0, 20)] public float VisualInset;
         [Range(0, 10)] public int VisualSmoothing;
     }
 
-    // --- Hierarchical Levels ---
     public enum DetailLevel : byte
     {
-        Global = 0,
-        Regional = 1,
-        Settlement = 2,
-        Urban = 3,
-        Infrastructure = 4,
-        Building = 5,
-        Detail = 6
+        Global=0, Regional=1, Settlement=2, Urban=3, Infrastructure=4, Building=5, Detail=6
     }
 
     public struct DetailLevelData : IComponentData
@@ -117,7 +130,6 @@ namespace VoronoiMapGen.Components
         public float RenderThreshold;
     }
 
-    // --- Helpers ---
     public struct BiomeColorEntry : IComponentData
     {
         public BiomeType biomeType;

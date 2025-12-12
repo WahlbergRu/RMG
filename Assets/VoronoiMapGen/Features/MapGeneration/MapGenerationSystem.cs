@@ -1,3 +1,6 @@
+// ============================================================
+// FILE: Assets\VoronoiMapGen\Features\MapGeneration\MapGenerationSystem.cs
+// ============================================================
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -9,314 +12,364 @@ using VoronoiMapGen.Features.Data;
 using VoronoiMapGen.Features.MapGeneration.Components;
 using VoronoiMapGen.Features.MapGeneration.Jobs;
 using VoronoiMapGen.Features.Utils;
+using VoronoiMapGen.Features.Civilization.Components;
+using VoronoiMapGen.Features.MapGeneration.Utils; 
 using VoronoiMapGen.Utils;
+using Unity.Transforms;
 
 namespace VoronoiMapGen.Features.MapGeneration.Systems
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
     public partial class MapGenerationSystem : SystemBase
     {
-        private int m_CurrentLevel;
-        private MapHistoryData m_History;
-        private bool m_IsComplete;
-        private bool m_IsInitialized;
-        private NativeArray<LevelSettings> m_LevelSettings;
-        private MapSettings m_Settings;
+        private enum GenPhase
+        {
+            Init,
+            LoadOrGenerate,
+            Gen_Sites,
+            Gen_Relaxation_Iter,
+            Gen_Simulation,
+            Gen_FinalizeGeo,
+            Batch_Cells_Init, Batch_Cells_Run,
+            Batch_Edges_Init, Batch_Edges_Run,
+            FinishLevel,
+            AllComplete,
+            ErrorState
+        }
+
+        private GenPhase _phase = GenPhase.Init;
+        private MapHistoryData _history;
+        private MapGenSession _session;
+
+        private NativeArray<LevelSettings> _levelSettings;
+        private MapSettings _settings;
+        private int _currentLevel = 0;
+        private int _relaxIterCurrent = 0;
+        private int _spawnedCount = 0;
+        
+        // Batch limits
+        private const int CELL_BATCH = 200; 
+        private const int EDGE_BATCH = 5000; // Дороги спавнятся большими пачками, т.к. они простые
+
+        private EntityArchetype _cellArchetype;
+        private EntityArchetype _edgeArchetype;
 
         protected override void OnCreate()
         {
             RequireForUpdate<MapSettings>();
+            RequireForUpdate<GenerationStatus>();
         }
 
         protected override void OnDestroy()
         {
-            this.Dependency.Complete();
-            if (m_LevelSettings.IsCreated) m_LevelSettings.Dispose();
-            if (m_History != null) m_History.Dispose();
+            Dependency.Complete();
+            if (_levelSettings.IsCreated) _levelSettings.Dispose();
+            if (_history != null) _history.Dispose();
+            if (_session != null) _session.Dispose();
         }
 
         protected override void OnUpdate()
         {
-            if (m_IsComplete) return;
-            if (!m_IsInitialized)
+            var statusEntity = SystemAPI.GetSingletonEntity<GenerationStatus>();
+            var status = SystemAPI.GetComponent<GenerationStatus>(statusEntity);
+
+            if (_phase == GenPhase.AllComplete || status.IsCompleted) return;
+            if (_phase == GenPhase.ErrorState) return;
+
+            try 
             {
-                Initialize();
-                return;
-            }
-
-            if (m_CurrentLevel < m_LevelSettings.Length)
-            {
-                ProcessSingleLevel(m_CurrentLevel);
-                m_CurrentLevel++;
-            }
-            else
-            {
-                CompleteGeneration();
-            }
-        }
-
-        private void Initialize()
-        {
-            Entity settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
-            if (EntityManager.HasComponent<MapGeneratedTag>(settingsEntity)) { Enabled = false; return; }
-
-            m_Settings = SystemAPI.GetSingleton<MapSettings>();
-            DynamicBuffer<LevelSettings> buffer = EntityManager.GetBuffer<LevelSettings>(settingsEntity);
-            m_LevelSettings = buffer.ToNativeArray(Allocator.Persistent);
-
-            m_History = new MapHistoryData(m_LevelSettings.Length);
-            EntityManager.AddComponent<MapGenerationInProgress>(settingsEntity);
-            m_IsInitialized = true;
-        }
-
-        private void ProcessSingleLevel(int level)
-        {
-            Debug.Log($"Processing L{level}");
-            LevelSettings levelSettings = m_LevelSettings[level];
-            
-            NativeArray<float2> sites = default;
-            NativeArray<VoronoiSite> meta = default;
-            NativeArray<TectonicPlateData> tectonicData = default;
-            NativeArray<ClimateData> climateData = default;
-            NativeArray<HydrologyData> hydrologyData = default;
-            NativeArray<BiomeData> biomeData = default;
-
-            NativeList<VoronoiCell> cellsList = new NativeList<VoronoiCell>(Allocator.Persistent);
-            NativeList<VoronoiEdge> edgesList = new NativeList<VoronoiEdge>(Allocator.Persistent);
-
-            // Cache vars
-            NativeArray<float2> cv = default; NativeArray<int> cc = default; NativeArray<VoronoiEdge> ce = default;
-            bool fromCache = m_Settings.UseCache && MapCacheUtils.LoadLevel(m_Settings.Seed, level,
-                    out sites, out meta, out tectonicData, out climateData, out hydrologyData, out biomeData, out cv, out cc, out ce);
-
-            if (fromCache)
-            {
-                NativeList<float2> tvL = new NativeList<float2>(cv.Length, Allocator.Temp); tvL.AddRange(cv);
-                NativeList<int> tcL = new NativeList<int>(cc.Length, Allocator.Temp); tcL.AddRange(cc);
-                MapProcessingHelpers.AssembleFinalGeometry(level, sites, meta, new NativeList<TriangleIndices>(0, Allocator.Temp), tvL, tcL, ref cellsList, ref edgesList);
-                edgesList.Clear(); edgesList.AddRange(ce);
-                cv.Dispose(); cc.Dispose(); ce.Dispose();
-            }
-            else
-            {
-                NativeArray<VoronoiCell> pC = default; NativeArray<VoronoiSite> pM = default;
-                NativeArray<HydrologyData> pH = default; NativeArray<TectonicPlateData> pT = default; NativeArray<ClimateData> pCl = default;
-
-                if (m_History.TryGetLevel(level - 1, out MapLevelData parentData)) { pC=parentData.Cells; pM=parentData.Meta; pH=parentData.Hydrology; pT=parentData.Tectonics; pCl=parentData.Climate; }
-
-                (NativeArray<float2> rawS, NativeArray<VoronoiSite> rawM) = SiteGenerator.Generate(m_Settings, levelSettings, level, pC, pM, pH, pT, pCl);
-                (sites, meta) = MapProcessingHelpers.FilterValidSites(rawS, rawM, Allocator.Persistent);
-                rawS.Dispose(); rawM.Dispose();
-
-                NativeList<TriangleIndices> tri = new NativeList<TriangleIndices>(Allocator.TempJob);
-                NativeList<float2> verts = new NativeList<float2>(Allocator.TempJob);
-                NativeList<int> counts = new NativeList<int>(Allocator.TempJob);
-
-                for (int i = 0; i <= levelSettings.RelaxationIterations; i++) {
-                    DelaunayBuilder.Triangulate(sites, ref tri, m_Settings.MapSize);
-                    verts.Clear(); counts.Clear();
-                    VoronoiBuilder.BuildCells(sites, tri, m_Settings.MapSize, ref verts, ref counts);
-                    if (i != levelSettings.RelaxationIterations) ApplyLloydRelaxation(sites, verts, counts, m_Settings.MapSize);
-                }
-
-                int cnt = sites.Length;
-                tectonicData = new NativeArray<TectonicPlateData>(cnt, Allocator.Persistent);
-                climateData = new NativeArray<ClimateData>(cnt, Allocator.Persistent);
-                biomeData = new NativeArray<BiomeData>(cnt, Allocator.Persistent);
-                hydrologyData = new NativeArray<HydrologyData>(cnt, Allocator.Persistent);
-
-                NativeArray<TectonicPlateData> dTm = new NativeArray<TectonicPlateData>(0, Allocator.TempJob);
-                NativeArray<ClimateData> dCm = new NativeArray<ClimateData>(0, Allocator.TempJob);
-
-                new TectonicGenerationJob { Seed = m_Settings.Seed, MapSize = m_Settings.MapSize, Level = level, Sites = sites, SiteMeta = meta, ParentTectonics = level == 0 ? dTm : pT, TectonicData = tectonicData }.Schedule(cnt, 64).Complete();
-                new ClimateGenerationJob { Seed = m_Settings.Seed, MapSize = m_Settings.MapSize, Level = level, Sites = sites, SiteMeta = meta, Tectonics = tectonicData, ParentClimate = level == 0 ? dCm : pCl, Climate = climateData, Biomes = biomeData }.Schedule(cnt, 64).Complete();
-                dTm.Dispose(); dCm.Dispose();
-
-                NativeList<VoronoiEdge> tEd = MapProcessingHelpers.ExtractEdgesFromDelaunay(tri, Allocator.TempJob);
-                NativeParallelMultiHashMap<int, NeighborInfo> nMap = new NativeParallelMultiHashMap<int, NeighborInfo>(tEd.Length*2, Allocator.TempJob);
-                new BuildNeighborGraphJob { Edges = tEd, SitePositions = sites, Tectonics = tectonicData, MaxConnectionDistSq = 500000f, NeighborsMap = nMap }.Schedule().Complete();
-
-                NativeArray<VoronoiCell> tmpCells = new NativeArray<VoronoiCell>(cnt, Allocator.TempJob);
-                for(int i=0;i<cnt;i++) tmpCells[i] = new VoronoiCell { SiteIndex=i, Centroid=sites[i] };
-                new CalculateHydrologyJob { Cells = tmpCells, Tectonics = tectonicData, Climate = climateData, NeighborsMap = nMap, Hydrology = hydrologyData }.Schedule().Complete();
-                tmpCells.Dispose(); nMap.Dispose(); tEd.Dispose();
-
-                MapProcessingHelpers.AssembleFinalGeometry(level, sites, meta, tri, verts, counts, ref cellsList, ref edgesList);
-                if (m_Settings.UseCache) MapCacheUtils.SaveLevel(m_Settings.Seed, level, sites, meta, tectonicData, climateData, hydrologyData, biomeData, verts, counts, edgesList);
-                tri.Dispose(); verts.Dispose(); counts.Dispose();
-            }
-
-            NativeArray<VoronoiCell> fC = new NativeArray<VoronoiCell>(cellsList.Length, Allocator.Persistent); fC.CopyFrom(cellsList.AsArray());
-            NativeArray<VoronoiEdge> fE = new NativeArray<VoronoiEdge>(edgesList.Length, Allocator.Persistent); fE.CopyFrom(edgesList.AsArray());
-
-            MapLevelData lvlData = new MapLevelData { LevelIndex = level, Sites = sites, Meta = meta, Cells = fC, Edges = fE, Tectonics = tectonicData, Climate = climateData, Hydrology = hydrologyData, Biomes = biomeData };
-            
-            EntityCreationPipeline.CreateEntities(EntityManager, lvlData, levelSettings, m_Settings.MapSize, edgesList);
-            m_History.StoreLevel(lvlData);
-            cellsList.Dispose(); edgesList.Dispose();
-        }
-
-        private void ApplyLloydRelaxation(NativeArray<float2> sites, NativeList<float2> verts, NativeList<int> counts, float2 mapSize)
-        {
-            int off = 0;
-            for(int i=0; i<sites.Length; i++) {
-                int c = counts[i];
-                if (c>0) {
-                    float2 centroid = 0; float area = 0;
-                    for(int k=0; k<c; k++) {
-                        float2 curr = verts[off+k]; float2 next = verts[off+(k+1)%c];
-                        float a = curr.x*next.y - next.x*curr.y;
-                        area += a; centroid += (curr+next)*a;
-                    }
-                    if(math.abs(area)>1e-5f) sites[i] = math.clamp(centroid/(area*3f), 0, mapSize);
-                }
-                off += c;
-            }
-        }
-
-        private void CompleteGeneration()
-        {
-            m_IsComplete = true;
-            Entity e = SystemAPI.GetSingletonEntity<MapSettings>();
-            EntityManager.AddComponent<MapGeneratedTag>(e);
-            EntityManager.RemoveComponent<MapGenerationInProgress>(e);
-            Enabled = false;
-        }
-    }
-
-    [BurstCompile]
-    public struct TectonicGenerationJob : IJobParallelFor
-    {
-        public int Seed;
-        public float2 MapSize;
-        public int Level;
-        [ReadOnly] public NativeArray<float2> Sites;
-        [ReadOnly] public NativeArray<VoronoiSite> SiteMeta;
-        [ReadOnly] public NativeArray<TectonicPlateData> ParentTectonics;
-        public NativeArray<TectonicPlateData> TectonicData;
-
-        public void Execute(int i)
-        {
-            float2 pos = Sites[i];
-            float baseHeight = 0;
-            bool isOcean = false;
-
-            if (Level == 0)
-            {
-                // GLOBAL (L0) GENERATION
-                float2 center = MapSize * 0.5f;
-                float dist = math.distance(pos, center);
-                float maxRadius = math.min(MapSize.x, MapSize.y) * 0.45f;
-                float distPercent = math.clamp(dist / maxRadius, 0f, 1f);
-
-                float islandShape = (1.0f - math.pow(distPercent, 1.5f)) * 1.5f - 0.3f;
-                float baseNoise = noise.snoise(pos * 0.0004f + new float2(Seed * 0.1f));
-                
-                float ridged = 1.0f - math.abs(noise.snoise(pos * 0.0012f + new float2(Seed * 0.5f)));
-                ridged = math.pow(ridged, 2.5f); 
-
-                baseHeight = islandShape + baseNoise * 0.3f + ridged * 0.8f * math.smoothstep(0.2f, 0.8f, islandShape);
-                
-                if (distPercent < 0.7f && baseNoise < -0.2f) baseHeight *= 0.8f; // coastline logic
-                isOcean = baseHeight < 0.08f;
-            }
-            else
-            {
-                // CHILD GENERATION (INHERITANCE)
-                // --- FIXED INHERITANCE LOGIC ---
-                int parentIdx = SiteMeta[i].ParentIndex;
-                if (ParentTectonics.Length > 0 && parentIdx >= 0 && parentIdx < ParentTectonics.Length)
+                switch (_phase)
                 {
-                    TectonicPlateData parentData = ParentTectonics[parentIdx];
-                    if (parentData.IsOcean)
+                    case GenPhase.Init:
+                        DoInitialize();
+                        UpdateUI(ref status, 0, "System Initialization...");
+                        _phase = GenPhase.LoadOrGenerate;
+                        break;
+
+                    case GenPhase.LoadOrGenerate:
+                        if (_currentLevel >= _levelSettings.Length) {
+                            _phase = GenPhase.AllComplete;
+                            DoComplete(ref status);
+                            break; 
+                        }
+                        
+                        _session = new MapGenSession(_currentLevel);
+                        _phase = GenPhase.Gen_Sites;
+                        UpdateUI(ref status, GetGlobalP(0), $"L{_currentLevel}: Sites...");
+                        break;
+
+                    case GenPhase.Gen_Sites:
+                        MapGenAlgorithms.GenerateSites(_session, _settings, _levelSettings[_currentLevel], _history);
+                        MapGenAlgorithms.BuildGeometry(_session, _settings.MapSize);
+                        _relaxIterCurrent = 0;
+                        _phase = GenPhase.Gen_Relaxation_Iter;
+                        break;
+
+                    case GenPhase.Gen_Relaxation_Iter:
+                        int maxIter = _levelSettings[_currentLevel].RelaxationIterations;
+                        if (_relaxIterCurrent < maxIter) {
+                            MapGenAlgorithms.RelaxSites(_session, _settings.MapSize);
+                            MapGenAlgorithms.BuildGeometry(_session, _settings.MapSize);
+                            _relaxIterCurrent++;
+                            float p = (float)_relaxIterCurrent / (maxIter + 1);
+                            UpdateUI(ref status, GetGlobalP(p * 0.1f), $"L{_currentLevel}: Shaping ({_relaxIterCurrent})");
+                        } else {
+                            _phase = GenPhase.Gen_Simulation;
+                        }
+                        break;
+
+                    case GenPhase.Gen_Simulation:
+                        UpdateUI(ref status, GetGlobalP(0.15f), $"L{_currentLevel}: Eco Simulation...");
+                        MapGenAlgorithms.RunSimulation(_session, _settings, _history);
+                        _phase = GenPhase.Gen_FinalizeGeo;
+                        break;
+
+                    case GenPhase.Gen_FinalizeGeo:
+                        MapGenAlgorithms.FinalizeEdgesAndCells(_session);
+                        _session.PrepareForBatching();
+                        SetupParentSearch(_currentLevel - 1);
+                        _spawnedCount = 0;
+                        _phase = GenPhase.Batch_Cells_Init;
+                        break;
+
+                    case GenPhase.Batch_Cells_Init:
+                        _phase = GenPhase.Batch_Cells_Run;
+                        UpdateUI(ref status, GetGlobalP(0.2f), $"L{_currentLevel}: Cells Spawning...");
+                        break;
+
+                    case GenPhase.Batch_Cells_Run:
+                        int processed = SpawnCellsBatch(CELL_BATCH);
+                        float progress = (float)processed / math.max(1, _session.FinalCells.Length);
+                        UpdateUI(ref status, GetGlobalP(0.2f + progress * 0.6f), $"L{_currentLevel}: Cells {(int)(progress*100)}%");
+                        if (processed >= _session.FinalCells.Length) {
+                            _spawnedCount = 0;
+                            _phase = GenPhase.Batch_Edges_Init;
+                        }
+                        break;
+
+                    case GenPhase.Batch_Edges_Init:
+                        // === ПРОВЕРКА НАСТРОЕК (L1, L2 ON; L3, L4 OFF) ===
+                        if (_levelSettings[_currentLevel].GenerateRoads == 0)
+                        {
+                            UpdateUI(ref status, GetGlobalP(0.9f), $"L{_currentLevel}: Roads Skipped");
+                            _phase = GenPhase.FinishLevel;
+                        }
+                        else
+                        {
+                            _spawnedCount = 0;
+                            _phase = GenPhase.Batch_Edges_Run;
+                            UpdateUI(ref status, GetGlobalP(0.85f), $"L{_currentLevel}: Linking Roads...");
+                        }
+                        break;
+
+                    case GenPhase.Batch_Edges_Run:
+                        // Теперь SpawnEdgesBatch умный и отфильтрует ненужное
+                        int eProcessed = SpawnEdgesBatch(EDGE_BATCH);
+                        if (eProcessed >= _session.Edges.Length) {
+                            _phase = GenPhase.FinishLevel;
+                        }
+                        break;
+
+                    case GenPhase.FinishLevel:
+                        _history.StoreLevel(_session.ToLevelData());
+                        _session.ReleaseSimulationOwnership();
+                        _session.Dispose(); 
+                        _session = null;
+
+                        // Очистка мусора чтобы память не текла между уровнями
+                        System.GC.Collect(); 
+
+                        _currentLevel++;
+                        _phase = GenPhase.LoadOrGenerate; 
+                        break;
+                }
+
+                if(status.ProcessedLevels != _currentLevel && _phase != GenPhase.AllComplete)
+                    status.ProcessedLevels = _currentLevel;
+                
+                SystemAPI.SetComponent(statusEntity, status);
+            }
+            catch(System.Exception ex)
+            {
+                Debug.LogException(ex);
+                _phase = GenPhase.ErrorState;
+                UpdateUI(ref status, 0, "ERROR: See Console");
+                SystemAPI.SetComponent(statusEntity, status);
+            }
+        }
+
+        private float GetGlobalP(float localP) {
+            float w = 1.0f / math.max(1, _levelSettings.Length);
+            return (_currentLevel * w) + (localP * w);
+        }
+
+        private int SpawnCellsBatch(int limit)
+        {
+            if(!_session.FinalCells.IsCreated) return _spawnedCount; 
+            int total = _session.FinalCells.Length;
+            int count = math.min(limit, total - _spawnedCount);
+            if (count <= 0) return _spawnedCount;
+
+            using var ents = EntityManager.CreateEntity(_cellArchetype, count, Allocator.Temp);
+            var settings = _levelSettings[_currentLevel];
+            var mSize = _settings.MapSize;
+
+            for (int k = 0; k < count; k++)
+            {
+                int i = _spawnedCount + k;
+                Entity e = ents[k];
+                var cell = _session.FinalCells[i];
+                var meta = _session.Meta[i];
+                if (_session.ParentEntityMap.TryGetValue(meta.ParentIndex, out Entity pE)) cell.ParentEntity = pE;
+
+                EntityManager.SetComponentData(e, cell);
+                EntityManager.SetComponentData(e, meta);
+                EntityManager.SetComponentData(e, new DetailLevelData { Level=(DetailLevel)_currentLevel, LODThreshold=settings.LODThreshold, RenderThreshold=settings.RenderThreshold });
+                
+                EntityManager.SetComponentData(e, _session.Tectonics[i]);
+                EntityManager.SetComponentData(e, _session.Climate[i]);
+                EntityManager.SetComponentData(e, _session.Hydrology[i]);
+                EntityManager.SetComponentData(e, _session.Biomes[i]);
+                if(_session.Settlements.IsCreated) EntityManager.SetComponentData(e, _session.Settlements[i]);
+                if(_session.Districts.IsCreated) EntityManager.SetComponentData(e, _session.Districts[i]);
+                
+                EntityManager.SetComponentData(e, new DemographicsData());
+                EntityManager.SetComponentData(e, new CellBiome { 
+                    Type=_session.Biomes[i].Type, Elevation=_session.Tectonics[i].BaseHeight,
+                    Moisture=_session.Climate[i].Moisture, Temperature=_session.Climate[i].Temperature
+                });
+                EntityManager.SetComponentData(e, LocalTransform.FromPosition(meta.Position.x, 0, meta.Position.y));
+
+                var vb = EntityManager.GetBuffer<CellPolygonVertex>(e);
+                var tb = EntityManager.GetBuffer<CellTriIndex>(e);
+                CellGeometryBuilder.BuildPolygonForCell(vb, tb, cell, _session.PolyMap, mSize);
+            }
+            _spawnedCount += count;
+            return _spawnedCount;
+        }
+
+        private int SpawnEdgesBatch(int limit)
+        {
+            if(!_session.Edges.IsCreated) return _spawnedCount;
+            int total = _session.Edges.Length;
+            
+            // Если все проверили - выходим
+            if (_spawnedCount >= total) return total; 
+
+            // Считаем сколько проверить за кадр
+            int count = math.min(limit, total - _spawnedCount);
+            if (count <= 0) return _spawnedCount;
+
+            // --- 1. ФИЛЬТРАЦИЯ СПИСКА (L2 LIMIT) ---
+            NativeList<VoronoiEdge> validEdges = new NativeList<VoronoiEdge>(count, Allocator.Temp);
+            
+            for (int k = 0; k < count; k++)
+            {
+                var edge = _session.Edges[_spawnedCount + k];
+                
+                bool isGood = false;
+                
+                // Проверка валидности геометрии
+                if(math.lengthsq(edge.VertexA) > 0.01f)
+                {
+                    // Длина квадрата ребра
+                    float distSq = math.distancesq(edge.VertexA, edge.VertexB);
+                    
+                    if (_currentLevel == 1) // L1 (Region) - Берем почти все
                     {
-                        isOcean = true;
-                        baseHeight = -0.2f; 
+                        if(distSq > 10f) isGood = true;
+                    }
+                    else if (_currentLevel == 2) // L2 (Settlement) - ФИЛЬТР ПО ДЛИНЕ
+                    {
+                        // Не слишком длинные и не слишком короткие
+                        // 1500 это около 38 юнитов (sqrt(1500) = 38)
+                        if (distSq > 10f && distSq < 1500f) isGood = true; 
                     }
                     else
                     {
-                        // Снижаем амплитуду шума с каждым уровнем, чтобы не ломать высоту
-                        float amp = 0.15f / (float)(Level + 1); 
-                        float freq = 0.002f * math.pow(3.0f, Level);
-                        float detail = noise.snoise(pos * freq + new float2(Seed * 0.3f));
-
-                        // Строгое наследование: Height = Parent + small_variation
-                        baseHeight = parentData.BaseHeight + detail * amp;
-                        
-                        // Если родитель был сушей, ребенок скорее всего суша (если не очень низко)
-                        isOcean = baseHeight < 0.01f;
+                        // Для L0, L3+ - пускаем все валидные (если они не отключены флагом)
+                        // Но так как L3 выключен флагом, мы сюда не попадем
+                        // isGood = true; 
                     }
                 }
-                else
+
+                if(isGood) validEdges.Add(edge);
+            }
+
+            // --- 2. МАССОВЫЙ СПАВН ВАЛИДНЫХ ---
+            if(validEdges.Length > 0)
+            {
+                using var ents = EntityManager.CreateEntity(_edgeArchetype, validEdges.Length, Allocator.Temp);
+                for (int i=0; i<validEdges.Length; i++) 
                 {
-                    baseHeight = 0; isOcean = true;
+                    var ent = ents[i];
+                    var edge = validEdges[i];
+                    edge.CellA = Entity.Null; edge.CellB = Entity.Null;
+                    
+                    EntityManager.SetComponentData(ent, edge);
+                    EntityManager.SetComponentData(ent, new DetailLevelData{Level=(DetailLevel)_currentLevel});
                 }
             }
-
-            TectonicData[i] = new TectonicPlateData
-            {
-                IsOcean = isOcean,
-                Velocity = float2.zero,
-                BaseHeight = baseHeight,
-                CrustAge = 0
-            };
-        }
-    }
-
-    [BurstCompile]
-    public struct ClimateGenerationJob : IJobParallelFor
-    {
-        public int Seed;
-        public float2 MapSize;
-        public int Level;
-        [ReadOnly] public NativeArray<float2> Sites;
-        [ReadOnly] public NativeArray<VoronoiSite> SiteMeta;
-        [ReadOnly] public NativeArray<TectonicPlateData> Tectonics;
-        [ReadOnly] public NativeArray<ClimateData> ParentClimate;
-        public NativeArray<ClimateData> Climate;
-        public NativeArray<BiomeData> Biomes;
-
-        public void Execute(int i)
-        {
-            float2 pos = Sites[i];
-            TectonicPlateData plate = Tectonics[i];
-            float height = plate.BaseHeight;
-            float temp = 0.5f, moisture = 0.5f;
-
-            if (Level > 0 && ParentClimate.Length > 0)
-            {
-                int pIdx = SiteMeta[i].ParentIndex;
-                if (pIdx >= 0 && pIdx < ParentClimate.Length) {
-                    ClimateData pc = ParentClimate[pIdx];
-                    // Меньше вариаций для климата
-                    temp = pc.Temperature + noise.snoise(pos * 0.01f) * 0.02f;
-                    moisture = pc.Moisture + noise.snoise(pos * 0.01f + new float2(100)) * 0.02f;
-                }
-            }
-            else {
-                float lat = pos.y / MapSize.y;
-                temp = 1.0f - math.abs(lat - 0.5f) * 2.0f;
-                if (height > 0.4f) temp -= (height - 0.4f) * 0.8f; 
-                moisture = 0.5f + noise.snoise(pos * 0.0005f + new float2(Seed)) * 0.2f;
-            }
-
-            if (plate.IsOcean) { moisture = 1.0f; temp = 0.5f; }
-            temp = math.clamp(temp, 0, 1); moisture = math.clamp(moisture, 0, 1);
-
-            Climate[i] = new ClimateData { Temperature = temp, Moisture = moisture, WindDirection = 0 };
             
-            // BIOME TABLE
-            BiomeType type;
-            if (plate.IsOcean) type = BiomeType.Ocean;
-            else if (height < 0.07f) type = BiomeType.Coast;
-            else if (height > 0.9f) type = BiomeType.Snow;
-            else if (height > 0.6f) type = BiomeType.Mountain;
-            else if (temp < 0.25f) type = BiomeType.Ice;
-            else if (temp > 0.6f && moisture < 0.3f) type = BiomeType.Desert;
-            else if (temp > 0.6f && moisture < 0.6f) type = BiomeType.Grassland;
-            else type = BiomeType.Forest;
+            // Двигаем курсор
+            _spawnedCount += count;
+            
+            validEdges.Dispose();
+            return _spawnedCount;
+        }
 
-            Biomes[i] = new BiomeData { Type = type };
+        private void SetupParentSearch(int prevLevel)
+        {
+            if (prevLevel < 0) return;
+            if(!_session.ParentEntityMap.IsCreated) 
+                 _session.ParentEntityMap = new NativeParallelHashMap<int, Entity>(1000, Allocator.Persistent);
+
+            using var q = EntityManager.CreateEntityQuery(typeof(VoronoiSite));
+            using var ents = q.ToEntityArray(Allocator.Temp);
+            using var sites = q.ToComponentDataArray<VoronoiSite>(Allocator.Temp);
+            for(int i=0; i<ents.Length; i++) 
+                if(sites[i].Level == prevLevel) _session.ParentEntityMap.TryAdd(sites[i].Index, ents[i]);
+        }
+
+        private void DoInitialize() 
+        { 
+            var settingsEntity = SystemAPI.GetSingletonEntity<MapSettings>();
+            
+            if(EntityManager.HasComponent<MapGeneratedTag>(settingsEntity))
+                EntityManager.RemoveComponent<MapGeneratedTag>(settingsEntity);
+
+            _settings = SystemAPI.GetSingleton<MapSettings>();
+            var buf = EntityManager.GetBuffer<LevelSettings>(settingsEntity);
+            _levelSettings = buf.ToNativeArray(Allocator.Persistent);
+            
+            _history = new MapHistoryData(_levelSettings.Length);
+            
+            if(!EntityManager.HasComponent<MapGenerationInProgress>(settingsEntity))
+                EntityManager.AddComponent<MapGenerationInProgress>(settingsEntity);
+            
+            _currentLevel = 0; 
+            _phase = GenPhase.Init;
+
+            _cellArchetype = EntityManager.CreateArchetype(
+                typeof(VoronoiCell), typeof(VoronoiSite), typeof(DetailLevelData), typeof(LocalTransform), typeof(LocalToWorld),
+                typeof(CellPolygonVertex), typeof(CellTriIndex), 
+                typeof(TectonicPlateData), typeof(ClimateData), typeof(BiomeData),
+                typeof(CellBiome), typeof(HydrologyData), typeof(CellNeighbor), 
+                typeof(DemographicsData), typeof(SettlementData), typeof(CalcDemographicsTag), typeof(DistrictData) 
+            );
+            _edgeArchetype = EntityManager.CreateArchetype(typeof(VoronoiEdge), typeof(DetailLevelData), typeof(LocalToWorld), typeof(BorderEntityTag));
+        }
+        
+        private void DoComplete(ref GenerationStatus s) {
+            s.IsCompleted=true; s.TotalProgress=1f; s.CurrentStepName="Done";
+            EntityManager.AddComponent<MapGeneratedTag>(SystemAPI.GetSingletonEntity<MapSettings>());
+            EntityManager.RemoveComponent<MapGenerationInProgress>(SystemAPI.GetSingletonEntity<MapSettings>());
+            
+            Debug.Log($"Generation Complete! Created Levels: {_currentLevel}");
+        }
+        
+        private void UpdateUI(ref GenerationStatus s, float progress, string txt) {
+            s.TotalProgress = math.clamp(progress, 0, 1); s.CurrentStepName = txt;
         }
     }
 }

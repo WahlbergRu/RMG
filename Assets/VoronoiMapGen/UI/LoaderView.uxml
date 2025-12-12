@@ -1,0 +1,23 @@
+﻿<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <!-- Ссылка на файл стилей -->
+    <ui:Style src="LoaderStyles.uss" />
+    
+    <!-- 
+       ГЛАВНЫЙ КОНТЕЙНЕР (name="MainContainer").
+       Сюда применен класс .full-screen-container из USS.
+    -->
+    <ui:VisualElement name="MainContainer" class="full-screen-container">
+        
+        <!-- ПАНЕЛЬ -->
+        <ui:VisualElement class="panel">
+            <ui:Label text="GENERATING WORLD" class="title-label" />
+            
+            <!-- ПРОГРЕСС БАР (name="MainBar") -->
+            <ui:ProgressBar name="MainBar" value="0" high-value="1" />
+            
+            <!-- ТЕКСТ СТАТУСА (name="StatusTxt") -->
+            <ui:Label text="Wait..." name="StatusTxt" class="status-label" />
+        </ui:VisualElement>
+        
+    </ui:VisualElement>
+</ui:UXML>

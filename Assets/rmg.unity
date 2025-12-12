@@ -229,17 +229,23 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 474bcb49853aa07438625e644c072ee6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Version: 3
   m_UsePipelineSettings: 1
   m_AdditionalLightsShadowResolutionTier: 2
-  m_LightLayerMask: 1
-  m_RenderingLayers: 1
   m_CustomShadowLayers: 0
-  m_ShadowLayerMask: 1
-  m_ShadowRenderingLayers: 1
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 0
+  m_RenderingLayersMask:
+    serializedVersion: 0
+    m_Bits: 1
+  m_ShadowRenderingLayersMask:
+    serializedVersion: 0
+    m_Bits: 1
+  m_Version: 4
+  m_LightLayerMask: 1
+  m_ShadowLayerMask: 1
+  m_RenderingLayers: 1
+  m_ShadowRenderingLayers: 1
 --- !u!1 &336191270
 GameObject:
   m_ObjectHideFlags: 0
@@ -283,122 +289,212 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4ee6f5765c0ed124283575f081ffa107, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
-  Seed: 12370
-  UseCache: 0
+  m_EditorClassIdentifier: Assembly-CSharp::VoronoiMapGen.Bootstrap.MapGeneratorBootstrap
+  Seed: 83872
   MapSize: {x: 1000, y: 1000}
-  TerrainHeightScale: 500
-  ShowRivers: 1
-  RiverRenderLevels: 00010101
-  ShowRiverGizmos: 0
-  RiverDebugLevels: 00000000
+  TerrainHeightScale: 50
+  UseCache: 0
+  BaseTemperature: 0.5
+  TempHeightImpact: 0.9
+  BaseMoisture: 0.5
+  RainIntensity: 1
+  RiverFluxThreshold: 8
+  ShowSettlements: 1
+  GlobalPopScalar: 2000
+  MinSiteQuality: 0.6
+  TownSpawnChance: 0.2
+  OutpostSpawnChance: 0.15
+  MinPopOutpost: 5000
+  MinPopTown: 15000
+  MinPopMetropolis: 25000
   UseAutoLOD: 1
-  LevelConfigs:
-  - MinSiteCount: 60
-    MaxSiteCount: 80
+  Levels:
+  - ProfileName: L0 - Global (Continent)
+    MinSites: 12
+    MaxSites: 14
     ScaleFactor: 1
-    LODThreshold: 1200
-    RenderThreshold: 1200
-    ValueBias: 0
-    ValueScale: 0.1
-    RelaxationIterations: 5
+    RelaxationIterations: 2
     EmptyCellChance: 0
-    VisualInset: 0
-    VisualSmoothing: 0
-  - MinSiteCount: 25
-    MaxSiteCount: 32
+    LODThreshold: 3500
+    RenderThreshold: 5000
+    Style: 1
+    HeightScale: 120
+    BottomDepth: 80
+    TopSurfaceNoise: 0.5
+    TextureScale: 0.01
+    RockLayers: 3
+    LayerInset: 0.2
+    RiverWidthMultiplier: 8
+    MeanderAmplitude: 2
+    GenerateRoads: 0
+    MainRoadWidth: 2
+    SecondaryRoadWidth: 1
+    RoadSmoothing: 0.5
+  - ProfileName: L1 - Region
+    MinSites: 15
+    MaxSites: 25
     ScaleFactor: 1
+    RelaxationIterations: 3
+    EmptyCellChance: 0
+    LODThreshold: 1800
+    RenderThreshold: 3500
+    Style: 0
+    HeightScale: 60
+    BottomDepth: 40
+    TopSurfaceNoise: 0.3
+    TextureScale: 0.03
+    RockLayers: 3
+    LayerInset: 0.2
+    RiverWidthMultiplier: 4
+    MeanderAmplitude: 2
+    GenerateRoads: 1
+    MainRoadWidth: 4
+    SecondaryRoadWidth: 1
+    RoadSmoothing: 0.5
+  - ProfileName: L2 - Settlement Area
+    MinSites: 6
+    MaxSites: 8
+    ScaleFactor: 0.667
+    RelaxationIterations: 0
+    EmptyCellChance: 0
     LODThreshold: 800
-    RenderThreshold: 800
-    ValueBias: 0
-    ValueScale: 0.2
-    RelaxationIterations: 1
-    EmptyCellChance: 0
-    VisualInset: 0
-    VisualSmoothing: 0
-  - MinSiteCount: 3
-    MaxSiteCount: 8
-    ScaleFactor: 0.8
-    LODThreshold: 500
-    RenderThreshold: 500
-    ValueBias: 0
-    ValueScale: 0.3
-    RelaxationIterations: 1
-    EmptyCellChance: 0
-    VisualInset: 0
-    VisualSmoothing: 0
-  - MinSiteCount: 5
-    MaxSiteCount: 6
-    ScaleFactor: 1
-    LODThreshold: 200
-    RenderThreshold: 200
-    ValueBias: 0
-    ValueScale: 0.3
-    RelaxationIterations: 1
-    EmptyCellChance: 0
-    VisualInset: 0
-    VisualSmoothing: 0
-  VisualConfigs:
-  - Name: Level Settings
-    Style: 0
-    HeightScale: 20
-    BottomDepth: 0
-    TopSurfaceNoise: 0.2
-    RockLayers: 3
-    LayerInset: 0.3
-    RiverWidthMultiplier: 1
-    MeanderAmp: 2
-    MeanderFreq: 0.02
-    NoiseInfluence: 1
-  - Name: L1 Visuals
-    Style: 0
-    HeightScale: 20
-    BottomDepth: 0
-    TopSurfaceNoise: 0.2
-    RockLayers: 3
-    LayerInset: 0.3
-    RiverWidthMultiplier: 1
-    MeanderAmp: 2
-    MeanderFreq: 0.02
-    NoiseInfluence: 1
-  - Name: L2 Visuals
+    RenderThreshold: 1800
     Style: 2
-    HeightScale: 20
-    BottomDepth: 0
-    TopSurfaceNoise: 0.2
-    RockLayers: 3
-    LayerInset: 0.5
-    RiverWidthMultiplier: 1
-    MeanderAmp: 2
-    MeanderFreq: 0.02
-    NoiseInfluence: 1
-  - Name: L3 Visuals
-    Style: 0
-    HeightScale: 20
-    BottomDepth: 0
-    TopSurfaceNoise: 0.4
+    HeightScale: 30
+    BottomDepth: 20
+    TopSurfaceNoise: 0.15
+    TextureScale: 0.05
     RockLayers: 2
-    LayerInset: 0.5
+    LayerInset: 0.2
+    RiverWidthMultiplier: 2
+    MeanderAmplitude: 2
+    GenerateRoads: 1
+    MainRoadWidth: 2.5
+    SecondaryRoadWidth: 1.5
+    RoadSmoothing: 0.5
+  - ProfileName: L3 - Urban District
+    MinSites: 5
+    MaxSites: 5
+    ScaleFactor: 0.5
+    RelaxationIterations: 0
+    EmptyCellChance: 0
+    LODThreshold: 300
+    RenderThreshold: 800
+    Style: 0
+    HeightScale: 10
+    BottomDepth: 10
+    TopSurfaceNoise: 0.05
+    TextureScale: 0.1
+    RockLayers: 3
+    LayerInset: 0.2
     RiverWidthMultiplier: 1
-    MeanderAmp: 2
-    MeanderFreq: 0.02
-    NoiseInfluence: 1
+    MeanderAmplitude: 0.5
+    GenerateRoads: 0
+    MainRoadWidth: 1.8
+    SecondaryRoadWidth: 1
+    RoadSmoothing: 0.5
+  - ProfileName: L4 - Architecture/Detail
+    MinSites: 5
+    MaxSites: 6
+    ScaleFactor: 0.4
+    RelaxationIterations: 0
+    EmptyCellChance: 0
+    LODThreshold: 0
+    RenderThreshold: 300
+    Style: 0
+    HeightScale: 5
+    BottomDepth: 5
+    TopSurfaceNoise: 0.02
+    TextureScale: 0.25
+    RockLayers: 3
+    LayerInset: 0.2
+    RiverWidthMultiplier: 1
+    MeanderAmplitude: 2
+    GenerateRoads: 0
+    MainRoadWidth: 0.8
+    SecondaryRoadWidth: 0.5
+    RoadSmoothing: 0.5
+  ShowRivers: 1
+  RiverRenderLevels: 0000000001
+  RenderLevels: 0000000001
   ShowWireframe: 0
-  DebugLevels: 00000001
+  ShowRiverGizmos: 0
+  DebugLevels: 0000000000
+  RiverDebugLevels: 0000000001
   DebugColors:
   - {r: 0, g: 0, b: 0, a: 0}
-  - {r: 1, g: 1, b: 1, a: 0}
-  - {r: 1, g: 0, b: 0, a: 0}
-  - {r: 0, g: 1, b: 0.11449838, a: 0}
-  RenderLevels: 00000001
-  oceanColor: {r: 0.1, g: 0.3, b: 0.8, a: 1}
-  coastColor: {r: 0.9, g: 0.8, b: 0.6, a: 1}
-  iceColor: {r: 0.8, g: 0.9, b: 1, a: 1}
-  desertColor: {r: 0.9, g: 0.8, b: 0.5, a: 1}
-  grasslandColor: {r: 0.3, g: 0.7, b: 0.2, a: 1}
-  forestColor: {r: 0.1, g: 0.5, b: 0.1, a: 1}
-  mountainColor: {r: 0.5, g: 0.4, b: 0.3, a: 1}
-  snowColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
+  - {r: 0, g: 0, b: 0, a: 0}
+  - {r: 0, g: 0, b: 0, a: 0}
+  - {r: 0, g: 0, b: 0, a: 0}
+  - {r: 1, g: 1, b: 1, a: 1}
+--- !u!1 &1557535358
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1557535360}
+  - component: {fileID: 1557535361}
+  - component: {fileID: 1557535362}
+  m_Layer: 5
+  m_Name: Loader View
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1557535360
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1557535358}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1557535361
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1557535358}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
+  m_PanelSettings: {fileID: 11400000, guid: 8c56b3a1721588e4da42f6ec33ab6dcd, type: 2}
+  m_ParentUI: {fileID: 0}
+  sourceAsset: {fileID: 9197481963319205126, guid: f5b8490ce93645e28cc7acfe6b7f6fc7, type: 3}
+  m_SortingOrder: 0
+  m_Position: 0
+  m_WorldSpaceSizeMode: 1
+  m_WorldSpaceWidth: 1920
+  m_WorldSpaceHeight: 1080
+  m_PivotReferenceSize: 0
+  m_Pivot: 0
+  m_WorldSpaceCollider: {fileID: 0}
+--- !u!114 &1557535362
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1557535358}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8f0af818bb0a492aa3122cdd5e8c1c60, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VoronoiMapGen.UI.MapLoaderUI
 --- !u!1 &1649242809
 GameObject:
   m_ObjectHideFlags: 0
@@ -529,7 +625,6 @@ MonoBehaviour:
   m_ScreenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
   m_RequiresDepthTexture: 0
   m_RequiresColorTexture: 0
-  m_Version: 2
   m_TaaSettings:
     m_Quality: 3
     m_FrameInfluence: 0.1
@@ -537,6 +632,7 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+  m_Version: 2
 --- !u!114 &1649242814
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -559,6 +655,74 @@ MonoBehaviour:
   MinZoom: 20
   MaxZoom: 1500
   Smoothness: 7.43
+--- !u!1 &2047033101
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2047033102}
+  - component: {fileID: 2047033103}
+  - component: {fileID: 2047033104}
+  m_Layer: 0
+  m_Name: UI_MapInspector
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2047033102
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2047033101}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 23.2, y: 0, z: 145.56934}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2047033103
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2047033101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
+  m_PanelSettings: {fileID: 11400000, guid: 8c56b3a1721588e4da42f6ec33ab6dcd, type: 2}
+  m_ParentUI: {fileID: 0}
+  sourceAsset: {fileID: 9197481963319205126, guid: 92679d24564be2e49bd238e44db56e6e, type: 3}
+  m_SortingOrder: 0
+  m_Position: 0
+  m_WorldSpaceSizeMode: 1
+  m_WorldSpaceWidth: 1920
+  m_WorldSpaceHeight: 1080
+  m_PivotReferenceSize: 0
+  m_Pivot: 0
+  m_WorldSpaceCollider: {fileID: 0}
+--- !u!114 &2047033104
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2047033101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9c71cc3c1102485fb26dbf15d1902b5d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VoronoiMapGen.UI.MapInspectorController
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -566,3 +730,5 @@ SceneRoots:
   - {fileID: 1649242812}
   - {fileID: 247967743}
   - {fileID: 336191272}
+  - {fileID: 2047033102}
+  - {fileID: 1557535360}
